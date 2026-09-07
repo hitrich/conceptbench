@@ -10,7 +10,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.cache import cache
 from django.db import transaction, IntegrityError
-from django.http import HttpResponse
+from django.http import HttpResponse, JsonResponse
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -65,13 +65,13 @@ def demo_login(request):
     if not settings.ALLOW_DEMO:
         raise HttpError(403, 'Demo sessions are disabled on this installation.')
     if request.user.is_authenticated:
-        return {'ok': True}
+        return JsonResponse({'ok': True})
     throttle(request, 'demo', 20)
     with transaction.atomic():
         user = get_user_model().objects.create_user(username='demo-'+uuid.uuid4().hex, first_name='Alex')
         seed_demo(user)
     login(request, user)
-    return {'ok': True, 'csrf_token': get_token(request)}
+    return JsonResponse({'ok': True, 'csrf_token': get_token(request)})
 
 
 @api.post('/auth/login', auth=None)
@@ -82,7 +82,7 @@ def sign_in(request, data: S.Credentials):
     if user is None:
         raise HttpError(401, 'The username or password is incorrect.')
     login(request, user)
-    return {'ok': True, 'csrf_token': get_token(request)}
+    return JsonResponse({'ok': True, 'csrf_token': get_token(request)})
 
 
 @api.post('/auth/register', auth=None)
@@ -105,7 +105,7 @@ def register(request, data: S.Credentials):
     except IntegrityError:
         raise HttpError(409, 'That username is already in use.')
     login(request, user)
-    return {'ok': True, 'csrf_token': get_token(request)}
+    return JsonResponse({'ok': True, 'csrf_token': get_token(request)})
 
 
 @api.post('/auth/logout')
@@ -390,3 +390,140 @@ def delete_project(request, project_id: uuid.UUID):
     project.jobs.update(cancel_requested=True)
     project.delete()
     return {'ok': True, 'message': 'Project and derived application data deleted. Backups expire under the deployment retention policy.'}
+
+
+@api.get('/templates/aggregates')
+def aggregate_template(request):
+    fixture = json.loads((settings.BASE_DIR / 'demo/acquisition-mix.json').read_text())
+    output = io.StringIO()
+    from .posthog import COLUMNS
+    writer = csv.DictWriter(output, fieldnames=COLUMNS)
+    writer.writeheader()
+    writer.writerows(fixture['rows'])
+    response = HttpResponse(output.getvalue(), content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="conceptbench-aggregate-example-FABRICATED.csv"'
+    return response
+
+
+@api.post('/projects/{project_id}/analytics/csv')
+def aggregate_csv(request, project_id: uuid.UUID, file: UploadedFile = File(...), metadata: str = Form(...)):
+    project = project_for(request.user, project_id, write=True)
+    if file.size > 5*1024*1024:
+        raise HttpError(413, 'The CSV exceeds 5 MB.')
+    try:
+        meta = json.loads(metadata)
+        if not isinstance(meta, dict):
+            raise ValueError('Metadata must be an object.')
+        reader = csv.DictReader(io.StringIO(file.read().decode('utf-8-sig')))
+        from .posthog import COLUMNS
+        if reader.fieldnames != COLUMNS:
+            raise HttpError(422, 'Use the exact aggregate template columns and order.')
+        rows = []
+        for index, row in enumerate(reader, 2):
+            if index > 2001:
+                raise HttpError(422, 'Reduce the import to 2,000 aggregate rows.')
+            if None in row or any(v is None for v in row.values()):
+                raise HttpError(422, f'Row {index}: column count does not match the header.')
+            for key in ['signups', 'activated', 'retained', 'retained_activated']:
+                if not row[key].isdigit():
+                    raise HttpError(422, f'Row {index}: {key} must be a nonnegative integer.')
+                row[key] = int(row[key])
+            rows.append(row)
+        parsed = S.SnapshotIn(**{**meta, 'rows': rows})
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        raise HttpError(422, 'Use a valid UTF-8 CSV and JSON metadata.')
+    except ValueError:
+        raise HttpError(422, 'The aggregate schema or metadata is invalid. Check counts, dates, and quality declarations.')
+    contract = get_object_or_404(MetricContract, id=parsed.contract_id, project=project)
+    return assessment_record(save_snapshot(request.user, project, contract, parsed.model_dump(mode='json'), 'csv'))
+
+
+@api.post('/projects/{project_id}/experiments')
+def independent_experiment(request, project_id: uuid.UUID, data: S.ExperimentIn):
+    project = project_for(request.user, project_id, write=True)
+    experiment = Experiment.objects.create(project=project, **data.model_dump())
+    audit(request.user, project, 'experiment.create', experiment)
+    return experiment_record(experiment)
+
+
+@api.post('/projects/{project_id}/connections/posthog')
+def connect_posthog(request, project_id: uuid.UUID, data: S.PostHogIn):
+    from .posthog import verify, encrypt, ConnectorError
+    project = project_for(request.user, project_id, owner=True)
+    contract = get_object_or_404(MetricContract, id=data.contract_id, project=project)
+    if project.contracts.order_by('-version').first().id != contract.id:
+        raise HttpError(409, 'Use the latest approved metric definition.')
+    try:
+        encrypted = encrypt(data.api_key)
+        endpoint = verify(data.region, data.external_project_id, data.api_key, data.endpoint_name, data.endpoint_version)
+    except ConnectorError as exc:
+        raise HttpError(422, str(exc))
+    with transaction.atomic():
+        connection, _ = Connection.objects.update_or_create(project=project, defaults={'region': data.region, 'external_project_id': data.external_project_id, 'credential': encrypted, 'endpoints': endpoint, 'contract_hash': contract.content_hash, 'status': 'connected', 'last_error': ''})
+        audit(request.user, project, 'connection.connect', connection)
+    return record(connection, 'id region external_project_id endpoints status')
+
+
+@api.get('/projects/{project_id}/connections/posthog/catalog')
+def posthog_catalog(request, project_id: uuid.UUID):
+    from .posthog import catalog, ConnectorError
+    project = project_for(request.user, project_id, write=True)
+    connection = get_object_or_404(Connection, project=project)
+    try:
+        return catalog(connection)
+    except ConnectorError as exc:
+        raise HttpError(422, str(exc))
+
+
+@api.post('/projects/{project_id}/analytics/refresh', response={202: dict})
+def posthog_refresh(request, project_id: uuid.UUID, data: S.RefreshIn):
+    project = project_for(request.user, project_id, write=True)
+    connection = get_object_or_404(Connection, project=project)
+    if connection.status == 'needs_reconciliation':
+        raise HttpError(409, 'The metric definition changed. Reconcile the endpoint and reconnect.')
+    recent = project.jobs.filter(kind='posthog_refresh', created_at__gte=timezone.now()-timedelta(hours=1)).count()
+    key = request.headers.get('Idempotency-Key', '')
+    if recent >= 6 and not project.jobs.filter(kind='posthog_refresh', idempotency_key=key).exists():
+        raise HttpError(429, 'This project reached its six-refresh hourly request budget.')
+    contract = project.contracts.order_by('-version').first()
+    if connection.contract_hash != contract.content_hash:
+        raise HttpError(409, 'The endpoint and current contract do not match. Reconcile and reconnect.')
+    job, _ = enqueue(request.user, project, 'posthog_refresh', {**data.model_dump(mode='json'), 'connection_id':str(connection.id), 'contract_id':str(contract.id), 'contract_hash':contract.content_hash}, key)
+    return 202, record(job, 'id kind status progress')
+
+
+@api.post('/studies/{study_id}/runs', response={202: dict})
+@transaction.atomic
+def queue_panel(request, study_id: uuid.UUID, data: S.PanelIn):
+    from decimal import Decimal
+    from .panel import freeze_config, PanelError
+    study = get_object_or_404(Study, id=study_id)
+    project = project_for(request.user, study.project_id, write=True)
+    Project.objects.select_for_update().get(id=project.id)
+    if Decimal(str(data.budget)) > project.run_budget_limit:
+        raise HttpError(422, 'The requested spend exceeds the owner’s per-run limit.')
+    key = request.headers.get('Idempotency-Key', '')
+    existing = Job.objects.filter(project=project, kind='panel', idempotency_key=key).first()
+    payload = {'study_id':str(study.id), 'personas':data.personas, 'budget':data.budget}
+    if existing:
+        if existing.payload != payload:
+            raise HttpError(409, 'This idempotency key was used for different panel parameters.')
+        return 202, record(existing, 'id kind status progress')
+    if Job.objects.filter(project__workspace=project.workspace,kind='panel',status__in=['queued','running']).count() >= 2:
+        raise HttpError(429, 'This workspace already has two pending panels. Wait or cancel a run.')
+    try:
+        config = freeze_config(study, data.personas)
+    except PanelError as exc:
+        raise HttpError(503, str(exc))
+    job, _ = enqueue(request.user, project, 'panel', payload, key)
+    run = PanelRun.objects.create(study=study, job=job, config=config, budget=Decimal(str(data.budget)))
+    audit(request.user, project, 'panel.freeze', run)
+    return 202, record(job, 'id kind status progress')
+
+
+@api.get('/runs/{run_id}/responses')
+def panel_responses(request, run_id: uuid.UUID):
+    run = get_object_or_404(PanelRun, id=run_id)
+    project_for(request.user, run.study.project_id)
+    # Inspect generated reactions, but keep embeddings out of routine UI payloads.
+    return {'id':str(run.id), 'experimental':True, 'config':run.config, 'responses':[record(r,'id concept_id persona method status content usage') for r in run.responses.exclude(method__in=['anchors','embedding']).order_by('created_at')]}

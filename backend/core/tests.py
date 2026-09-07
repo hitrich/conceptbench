@@ -106,3 +106,11 @@ class WorkflowTests(TestCase):
         self.assertEqual(self.client.delete(f'/api/v1/projects/{self.project.id}').status_code, 200)
         self.assertFalse(AnalyticsSnapshot.objects.exists())
         self.assertFalse(HumanDataset.objects.exists())
+
+    def test_demo_login_with_real_csrf_session(self):
+        client = Client(enforce_csrf_checks=True)
+        token = client.get('/api/v1/session').json()['csrf_token']
+        response = client.post('/api/v1/auth/demo', HTTP_X_CSRFTOKEN=token)
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(client.get('/api/v1/session').json()['authenticated'])
+        self.assertEqual(len(client.get('/api/v1/projects').json()), 1)
