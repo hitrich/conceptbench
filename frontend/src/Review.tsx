@@ -20,7 +20,7 @@ import {
   ShieldCheck,
   Minus,
 } from 'lucide-react'
-import type { Overview, Assessment, Metric, Comparison, Source, Row } from './types'
+import type { Overview, Assessment, Metric, Comparison, Source, Row, Rate } from './types'
 import { api, number, dateLabel } from './api'
 import { Dialog } from './ui'
 
@@ -37,6 +37,24 @@ const metricLabels: Record<Metric, string> = {
   retention: 'W4 value retention',
   activation: 'A7 activation',
   conditional: 'W4 among activated users',
+}
+
+function RateCell({ value }: { value: Rate }) {
+  return (
+    <td>
+      <strong>{value.rate === null ? '—' : `${number(value.rate, 2)}%`}</strong>
+      <small>
+        {value.interval ? (
+          <>
+            {value.numerator} / {value.denominator} · CI{' '}
+            {value.interval.map((v) => number(v)).join('–')}%
+          </>
+        ) : (
+          'No mature eligible users'
+        )}
+      </small>
+    </td>
+  )
 }
 
 function Change({ comparison }: { comparison: Comparison }) {
@@ -621,31 +639,21 @@ export default function Review({
                           {s.segment}
                         </span>
                       </td>
-                      <td>
-                        <strong>{number(s.earlier.rate, 2)}%</strong>
-                        <small>
-                          {s.earlier.numerator} / {s.earlier.denominator} · CI{' '}
-                          {s.earlier.interval?.map((v) => number(v)).join('–')}%
-                        </small>
-                      </td>
-                      <td>
-                        <strong>{number(s.later.rate, 2)}%</strong>
-                        <small>
-                          {s.later.numerator} / {s.later.denominator} · CI{' '}
-                          {s.later.interval?.map((v) => number(v)).join('–')}%
-                        </small>
-                      </td>
+                      <RateCell value={s.earlier} />
+                      <RateCell value={s.later} />
                       <td>
                         <span className="neutral-pill">
-                          <Minus size={12} />
-                          {number(s.change.pp, 2)} pp
+                          {s.change.pp !== null && <Minus size={12} />}
+                          {s.change.pp === null ? 'Unavailable' : `${number(s.change.pp, 2)} pp`}
                         </span>
                       </td>
                       <td>
                         <span className="table-interpretation">
-                          {Math.abs(s.change.pp || 0) < 0.05
-                            ? 'Same observed rate'
-                            : 'Inspect the interval'}
+                          {s.change.pp === null
+                            ? 'Incomplete comparison'
+                            : Math.abs(s.change.pp) < 0.05
+                              ? 'Same observed rate'
+                              : 'Inspect the interval'}
                           <button
                             aria-label={`Inspect ${s.segment} source`}
                             className="icon-button"

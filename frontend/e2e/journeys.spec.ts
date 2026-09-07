@@ -146,6 +146,26 @@ test('CSV behavioral review creates a new sourced assessment', async ({ page }) 
   ).toBeVisible()
   await page.getByRole('button', { name: 'View source', exact: true }).click()
   await expect(page.getByRole('dialog')).toContainText('Reviewed aggregate test fixture')
+  await page.keyboard.press('Escape')
+  await page.getByRole('button', { name: 'Data & Settings', exact: true }).click()
+  await page.getByRole('button', { name: 'Import aggregates', exact: true }).click()
+  await page
+    .getByLabel('Aggregate CSV')
+    .setInputFiles({ name: 'immature.csv', mimeType: 'text/csv', buffer: csv })
+  await page.getByLabel('Source name', { exact: true }).fill('Immature window fixture')
+  await page.getByLabel('Analysis cutoff').fill('2026-07-30T00:00')
+  for (const box of await page.getByRole('dialog').getByRole('checkbox').all()) await box.check()
+  await page.getByRole('button', { name: 'Import & review' }).click()
+  await expect(page.getByRole('dialog')).not.toBeVisible()
+  await page.getByRole('button', { name: 'Review', exact: true }).click()
+  await expect(
+    page.getByRole('heading', { name: 'Resolve the evidence gaps before choosing a direction.' }),
+  ).toBeVisible()
+  await expect(page.getByText('Same observed rate', { exact: true })).toHaveCount(0)
+  await expect(page.locator('.table-interpretation')).toContainText([
+    'Incomplete comparison',
+    'Incomplete comparison',
+  ])
 })
 
 test('desktop accessibility, keyboard drawer, mobile navigation, and no viewport overflow', async ({

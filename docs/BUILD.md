@@ -17,7 +17,7 @@ Experiment specifications freeze when a test starts. An outcome can be recorded 
 
 ## Verification record — 7 September 2026
 
-The implementation passed 30 backend checks on both SQLite and PostgreSQL, and seven real Chromium journeys against the built Docker application. Those journeys cover demo/source/revision/export, human CSV, experiment lifecycle, aggregate CSV, all four surfaces' automated WCAG A/AA checks, keyboard/mobile behavior, combined reviews, account/project/definition setup and last-owner protection. Automated accessibility checks do not replace user testing with assistive technology.
+The implementation passed 30 backend checks on both SQLite and PostgreSQL, and seven real Chromium journeys against the built Docker application. Those journeys cover demo/source/revision/export, human CSV, experiment lifecycle, aggregate CSV and immature-window displays, all four surfaces' automated WCAG A/AA checks, keyboard/mobile behavior, combined reviews, account/project/definition setup and last-owner protection. Automated accessibility checks do not replace user testing with assistive technology.
 
 The production TypeScript build, source formatting, migration checks and generated schema checks pass. Docker web/database health checks pass and the worker runs. A PostgreSQL dump was restored into a fresh disposable database; project/study/brief counts and aggregate-source fingerprints matched the active installation. The disposable database was removed after verification. The committed screenshots use fabricated data.
 
