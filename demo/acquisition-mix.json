@@ -1,0 +1,12 @@
+{
+  "name": "Acquisition mix, not product decline",
+  "synthetic": true,
+  "analysis_cutoff": "2026-09-07T00:00:00Z",
+  "latest_event_at": "2026-09-06T22:40:00Z",
+  "rows": [
+    {"period":"earlier","cohort_start":"2026-06-01","cohort_end":"2026-06-28","segment":"Organic","signups":600,"activated":360,"retained":180,"retained_activated":162},
+    {"period":"earlier","cohort_start":"2026-06-01","cohort_end":"2026-06-28","segment":"Paid","signups":600,"activated":240,"retained":45,"retained_activated":36},
+    {"period":"later","cohort_start":"2026-07-01","cohort_end":"2026-07-28","segment":"Organic","signups":240,"activated":144,"retained":72,"retained_activated":65},
+    {"period":"later","cohort_start":"2026-07-01","cohort_end":"2026-07-28","segment":"Paid","signups":960,"activated":384,"retained":72,"retained_activated":58}
+  ]
+}
