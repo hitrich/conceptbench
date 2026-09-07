@@ -1,0 +1,81 @@
+name: Checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: conceptbench
+          POSTGRES_DB: conceptbench
+          POSTGRES_PASSWORD: test_database_only
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U conceptbench"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements-dev.txt
+      - run: black --check backend
+      - run: python backend/manage.py makemigrations --check --dry-run
+      - name: SQLite numerical, security, worker and workflow checks
+        run: python backend/manage.py test core
+      - name: PostgreSQL checks
+        run: python backend/manage.py test core
+        env:
+          DATABASE_URL: postgresql://conceptbench:test_database_only@localhost:5432/conceptbench
+      - run: python backend/manage.py evaluate_demo
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-python@v7.0.0
+        with:
+          python-version: '3.12'
+          cache: pip
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: pip install -r requirements.txt
+      - run: npm --prefix frontend ci
+      - name: API schema and client drift
+        run: |
+          python backend/manage.py export_openapi > docs/openapi.json
+          frontend/node_modules/.bin/openapi-typescript docs/openapi.json -o frontend/src/generated/api.d.ts
+          git diff --exit-code -- docs/openapi.json frontend/src/generated/api.d.ts
+      - run: npm --prefix frontend run format:check
+      - run: npm --prefix frontend run build
+      - name: Install browser
+        working-directory: frontend
+        run: npx playwright install --with-deps chromium
+      - name: Real browser journeys against the built application
+        env:
+          ALLOW_DEMO: '1'
+          ALLOW_REGISTRATION: '1'
+          E2E_BASE_URL: http://127.0.0.1:8000
+        run: |
+          python backend/manage.py migrate --noinput
+          python backend/manage.py collectstatic --noinput
+          python backend/manage.py runserver 127.0.0.1:8000 --noreload > /tmp/conceptbench-web.log 2>&1 &
+          app_pid=$!
+          trap 'kill "$app_pid"' EXIT
+          curl --retry 30 --retry-connrefused --retry-delay 1 --fail http://127.0.0.1:8000/healthz
+          npm --prefix frontend run test:e2e
+      - uses: actions/upload-artifact@v7.0.1
+        if: failure()
+        with:
+          name: browser-failure-traces
+          path: frontend/test-results/
+          retention-days: 7

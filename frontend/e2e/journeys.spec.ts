@@ -1,162 +1,250 @@
-import {test,expect} from '@playwright/test'
+import { test, expect } from '@playwright/test'
 import AxeBuilder from '@axe-core/playwright'
 
-async function openDemo(page){
+async function openDemo(page) {
   await page.goto('/')
-  await expect(page.getByRole('heading',{name:'Product review'})).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Product review' })).toBeVisible()
 }
 
-test('demo review, inspect evidence, revise, and export the actual brief',async({page})=>{
-  const errors:string[]=[];page.on('pageerror',e=>errors.push(e.message))
+test('demo review, inspect evidence, revise, and export the actual brief', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (e) => errors.push(e.message))
   await openDemo(page)
-  await expect(page.getByRole('heading',{name:'Investigate acquisition quality before product direction.'})).toBeVisible()
-  await page.getByRole('button',{name:'View source',exact:true}).click()
+  await expect(
+    page.getByRole('heading', {
+      name: 'Investigate acquisition quality before product direction.',
+    }),
+  ).toBeVisible()
+  await page.getByRole('button', { name: 'View source', exact: true }).click()
   await expect(page.getByRole('dialog')).toContainText('Follow the evidence')
   await expect(page.getByRole('dialog')).toContainText('first_report_completed')
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog')).not.toBeVisible()
-  await page.getByRole('button',{name:'Show data table'}).click()
+  await page.getByRole('button', { name: 'Show data table' }).click()
   await expect(page.getByRole('table')).toHaveCount(2)
-  await page.getByRole('button',{name:'Edit',exact:true}).click()
-  await page.getByLabel('Review owner',{exact:true}).fill('Jamie Researcher')
-  await page.getByRole('textbox',{name:/Analyst notes/}).fill('Validate acquisition economics before changing direction.')
-  await page.getByRole('button',{name:'Save new version'}).click()
+  await page.getByRole('button', { name: 'Edit', exact: true }).click()
+  await page.getByLabel('Review owner', { exact: true }).fill('Jamie Researcher')
+  await page
+    .getByRole('textbox', { name: /Analyst notes/ })
+    .fill('Validate acquisition economics before changing direction.')
+  await page.getByRole('button', { name: 'Save new version' }).click()
   await expect(page.getByRole('dialog')).not.toBeVisible()
   await expect(page.locator('.owner-row')).toContainText('Jamie Researcher')
-  await page.getByRole('tab',{name:'Version history'}).click()
-  await expect(page.getByRole('button',{name:/Decision Brief · version 2/})).toBeVisible()
-  await page.getByRole('button',{name:/Decision Brief · version 1/}).click()
+  await page.getByRole('tab', { name: 'Version history' }).click()
+  await expect(page.getByRole('button', { name: /Decision Brief · version 2/ })).toBeVisible()
+  await page.getByRole('button', { name: /Decision Brief · version 1/ }).click()
   await expect(page.locator('.owner-row')).toContainText('Alex Morgan')
-  await page.getByRole('button',{name:'Export brief',exact:true}).click()
-  const downloaded=page.waitForEvent('download')
-  await page.getByRole('button',{name:/Markdown brief/}).click()
-  const download=await downloaded
-  const stream=await download.createReadStream();let text='';for await(const part of stream!)text+=part.toString()
-  expect(text).toContain('225/1200');expect(text).toContain('144/1200');expect(text).toContain('Fabricated')
+  await page.getByRole('button', { name: 'Export brief', exact: true }).click()
+  const downloaded = page.waitForEvent('download')
+  await page.getByRole('button', { name: /Markdown brief/ }).click()
+  const download = await downloaded
+  const stream = await download.createReadStream()
+  let text = ''
+  for await (const part of stream!) text += part.toString()
+  expect(text).toContain('225/1200')
+  expect(text).toContain('144/1200')
+  expect(text).toContain('Fabricated')
   expect(errors).toEqual([])
 })
 
-test('human CSV journey validates study IDs and displays imported distributions',async({page})=>{
+test('human CSV journey validates study IDs and displays imported distributions', async ({
+  page,
+}) => {
   await openDemo(page)
-  const projects=await(await page.request.get('/api/v1/projects')).json()
-  const overview=await(await page.request.get(`/api/v1/projects/${projects[0].id}/overview`)).json()
-  const study=overview.studies[0]
-  await page.getByRole('button',{name:'ConceptLab',exact:true}).click()
+  const projects = await (await page.request.get('/api/v1/projects')).json()
+  const overview = await (
+    await page.request.get(`/api/v1/projects/${projects[0].id}/overview`)
+  ).json()
+  const study = overview.studies[0]
+  await page.getByRole('button', { name: 'ConceptLab', exact: true }).click()
   await expect(page.getByText('These example ratings are fabricated.')).toBeVisible()
-  await page.getByRole('button',{name:'Import human CSV'}).click()
-  const lines=['study_id,concept_version,respondent_id,question_id,rating,collected_at,comment,segment']
-  for(const concept of study.concepts)for(let i=0;i<5;i++)lines.push(`${study.id},${concept.id},anonymous-${i},intent,4,2026-09-01T12:00:00Z,Useful for a weekly review,small SaaS`)
-  await page.getByLabel('Ratings CSV').setInputFiles({name:'consented-study.csv',mimeType:'text/csv',buffer:Buffer.from(lines.join('\n'))})
-  await page.getByLabel('Recruitment source and exclusions').fill('Five opt-in participants from a moderated research exercise. Not a representative market sample.')
+  await page.getByRole('button', { name: 'Import human CSV' }).click()
+  const lines = [
+    'study_id,concept_version,respondent_id,question_id,rating,collected_at,comment,segment',
+  ]
+  for (const concept of study.concepts)
+    for (let i = 0; i < 5; i++)
+      lines.push(
+        `${study.id},${concept.id},anonymous-${i},intent,4,2026-09-01T12:00:00Z,Useful for a weekly review,small SaaS`,
+      )
+  await page.getByLabel('Ratings CSV').setInputFiles({
+    name: 'consented-study.csv',
+    mimeType: 'text/csv',
+    buffer: Buffer.from(lines.join('\n')),
+  })
+  await page
+    .getByLabel('Recruitment source and exclusions')
+    .fill(
+      'Five opt-in participants from a moderated research exercise. Not a representative market sample.',
+    )
   await page.getByRole('checkbox').check()
-  await page.getByRole('button',{name:'Import feedback',exact:true}).click()
+  await page.getByRole('button', { name: 'Import feedback', exact: true }).click()
   await expect(page.getByRole('dialog')).not.toBeVisible()
-  await expect(page.getByText('consented-study.csv', {exact:true})).toBeVisible()
-  await expect(page.getByText('Reported by people',{exact:true})).toBeVisible()
+  await expect(page.getByText('consented-study.csv', { exact: true })).toBeVisible()
+  await expect(page.getByText('Reported by people', { exact: true })).toBeVisible()
   await expect(page.locator('.concept-score').first()).toContainText('4.00')
-  await page.getByRole('button',{name:'Synthetic comparison',exact:false}).click()
-  await page.getByRole('button',{name:'Run comparison',exact:true}).click()
+  await page.getByRole('button', { name: 'Synthetic comparison', exact: false }).click()
+  await page.getByRole('button', { name: 'Run comparison', exact: true }).click()
   await expect(page.getByRole('dialog')).toContainText('A generation provider is not configured')
-  await expect(page.getByRole('button',{name:'Queue comparison'})).toBeDisabled()
+  await expect(page.getByRole('button', { name: 'Queue comparison' })).toBeDisabled()
 })
 
-test('owned experiment progresses from plan to an immutable recorded outcome',async({page})=>{
+test('owned experiment progresses from plan to an immutable recorded outcome', async ({ page }) => {
   await openDemo(page)
-  await page.getByRole('button',{name:'Create experiment',exact:true}).click()
+  await page.getByRole('button', { name: 'Create experiment', exact: true }).click()
   await page.getByLabel('Experiment name').fill('Paid audience experiment')
-  await page.getByLabel('Minimum useful effect',{exact:false}).fill('3 percentage points')
-  await page.getByLabel('Owner',{exact:true}).fill('Jordan')
-  await page.getByRole('dialog').getByRole('button',{name:'Create experiment',exact:true}).click()
+  await page.getByLabel('Minimum useful effect', { exact: false }).fill('3 percentage points')
+  await page.getByLabel('Owner', { exact: true }).fill('Jordan')
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: 'Create experiment', exact: true })
+    .click()
   await expect(page.getByRole('dialog')).not.toBeVisible()
-  await page.getByRole('button',{name:/^Experiments/}).first().click()
-  await page.getByRole('button',{name:/Paid audience experiment/}).click()
-  await page.getByRole('button',{name:'Start experiment'}).click()
-  await expect(page.getByRole('button',{name:'Record outcome',exact:true})).toBeVisible()
-  await page.getByRole('button',{name:'Record outcome',exact:true}).click()
-  await page.getByLabel('Observed result').fill('The completed cohort did not distinguish the two acquisition approaches at useful precision.')
-  await page.getByLabel('Supporting evidence or source reference').fill('Reviewed source cohort snapshot: test-fixture-2026-09')
-  await page.getByLabel('Limitations and alternative explanations').fill('Limited precision; seasonality and recruitment mix remain possible explanations.')
-  await page.getByRole('button',{name:'Record outcome',exact:true}).click()
+  await page
+    .getByRole('button', { name: /^Experiments/ })
+    .first()
+    .click()
+  await page.getByRole('button', { name: /Paid audience experiment/ }).click()
+  await page.getByRole('button', { name: 'Start experiment' }).click()
+  await expect(page.getByRole('button', { name: 'Edit specification' })).not.toBeVisible()
+  await expect(page.getByRole('button', { name: 'Record outcome', exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Record outcome', exact: true }).click()
+  await page
+    .getByLabel('Observed result')
+    .fill(
+      'The completed cohort did not distinguish the two acquisition approaches at useful precision.',
+    )
+  await page
+    .getByLabel('Supporting evidence or source reference')
+    .fill('Reviewed source cohort snapshot: test-fixture-2026-09')
+  await page
+    .getByLabel('Limitations and alternative explanations')
+    .fill('Limited precision; seasonality and recruitment mix remain possible explanations.')
+  await page.getByRole('button', { name: 'Record outcome', exact: true }).click()
   await expect(page.getByRole('dialog')).toContainText('OUTCOME · inconclusive')
-  await expect(page.getByRole('button',{name:'Edit specification'})).not.toBeVisible()
+  await expect(page.getByRole('button', { name: 'Edit specification' })).not.toBeVisible()
 })
 
-test('CSV behavioral review creates a new sourced assessment',async({page})=>{
+test('CSV behavioral review creates a new sourced assessment', async ({ page }) => {
   await openDemo(page)
-  await page.getByRole('button',{name:'Data & Settings',exact:true}).click()
-  await page.getByRole('button',{name:'Import aggregates',exact:true}).click()
-  const csv=await(await page.request.get('/api/v1/templates/aggregates')).body()
-  await page.getByLabel('Aggregate CSV').setInputFiles({name:'reviewed-aggregates.csv',mimeType:'text/csv',buffer:csv})
-  await page.getByLabel('Source name',{exact:true}).fill('Reviewed aggregate test fixture')
+  await page.getByRole('button', { name: 'Data & Settings', exact: true }).click()
+  await page.getByRole('button', { name: 'Import aggregates', exact: true }).click()
+  const csv = await (await page.request.get('/api/v1/templates/aggregates')).body()
+  await page
+    .getByLabel('Aggregate CSV')
+    .setInputFiles({ name: 'reviewed-aggregates.csv', mimeType: 'text/csv', buffer: csv })
+  await page.getByLabel('Source name', { exact: true }).fill('Reviewed aggregate test fixture')
   await page.getByLabel('Analysis cutoff').fill('2026-09-07T00:00')
-  for(const box of await page.getByRole('dialog').getByRole('checkbox').all())await box.check()
-  await page.getByRole('button',{name:'Import & review'}).click()
+  for (const box of await page.getByRole('dialog').getByRole('checkbox').all()) await box.check()
+  await page.getByRole('button', { name: 'Import & review' }).click()
   await expect(page.getByRole('dialog')).not.toBeVisible()
-  await page.getByRole('button',{name:'Review',exact:true}).click()
-  await expect(page.getByRole('heading',{name:'Investigate acquisition quality before product direction.'})).toBeVisible()
-  await page.getByRole('button',{name:'View source',exact:true}).click()
+  await page.getByRole('button', { name: 'Review', exact: true }).click()
+  await expect(
+    page.getByRole('heading', {
+      name: 'Investigate acquisition quality before product direction.',
+    }),
+  ).toBeVisible()
+  await page.getByRole('button', { name: 'View source', exact: true }).click()
   await expect(page.getByRole('dialog')).toContainText('Reviewed aggregate test fixture')
 })
 
-test('desktop accessibility, keyboard drawer, mobile navigation, and no viewport overflow',async({page})=>{
+test('desktop accessibility, keyboard drawer, mobile navigation, and no viewport overflow', async ({
+  page,
+}) => {
   await openDemo(page)
-  const results=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).analyze()
-  expect(results.violations.map(v=>({id:v.id,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary}))}))).toEqual([])
+  for (const name of [/^Review$/, /^ConceptLab$/, /^Experiments/, /^Data & Settings$/]) {
+    await page.getByRole('navigation').getByRole('button', { name }).click()
+    const results = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+      .analyze()
+    expect(
+      results.violations.map((v) => ({
+        id: v.id,
+        nodes: v.nodes.map((n) => ({ target: n.target, summary: n.failureSummary })),
+      })),
+    ).toEqual([])
+  }
+  await page.getByRole('button', { name: 'Review', exact: true }).click()
   await page.keyboard.press('ControlOrMeta+k')
   await expect(page.getByRole('dialog')).toBeVisible()
   await page.keyboard.press('Escape')
-  await page.setViewportSize({width:390,height:844})
-  await expect(page.getByRole('button',{name:'Open navigation'})).toBeVisible()
-  await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390)
-  await page.getByRole('button',{name:'Open navigation'}).click()
-  await page.getByRole('button',{name:'ConceptLab',exact:true}).click()
-  await expect(page.getByRole('heading',{name:'Find the right first promise'})).toBeVisible()
-  await expect.poll(()=>page.evaluate(()=>document.documentElement.scrollWidth)).toBe(390)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(page.getByRole('button', { name: 'Open navigation' })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(390)
+  await page.getByRole('button', { name: 'Open navigation' }).click()
+  await page.getByRole('button', { name: 'ConceptLab', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Find the right first promise' })).toBeVisible()
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(390)
 })
 
-test('new review links selected research while preserving the measured mix explanation',async({page})=>{
+test('new review links selected research while preserving the measured mix explanation', async ({
+  page,
+}) => {
   await openDemo(page)
-  const projects=await(await page.request.get('/api/v1/projects')).json()
-  const overview=await(await page.request.get(`/api/v1/projects/${projects[0].id}/overview`)).json()
-  const dataset=overview.studies[0].datasets[0]
-  await page.getByRole('button',{name:'New review',exact:true}).click()
-  await page.getByRole('dialog').getByLabel(dataset.name,{exact:false}).check()
+  const projects = await (await page.request.get('/api/v1/projects')).json()
+  const overview = await (
+    await page.request.get(`/api/v1/projects/${projects[0].id}/overview`)
+  ).json()
+  const dataset = overview.studies[0].datasets[0]
+  await page.getByRole('button', { name: 'New review', exact: true }).click()
+  await page.getByRole('dialog').getByLabel(dataset.name, { exact: false }).check()
   await page.getByLabel('What does the reviewed human research suggest?').selectOption('weak_value')
-  await page.getByRole('button',{name:'Calculate new review',exact:true}).click()
+  await page.getByRole('button', { name: 'Calculate new review', exact: true }).click()
   await expect(page.getByRole('dialog')).not.toBeVisible()
-  await expect(page.getByRole('heading',{name:'Research linked to this review'})).toBeVisible()
-  await expect(page.getByText(dataset.name,{exact:true})).toBeVisible()
-  await expect(page.getByRole('heading',{name:'Investigate acquisition quality before product direction.'})).toBeVisible()
-  await page.getByRole('tab',{name:'Version history'}).click()
-  await expect(page.getByRole('button',{name:/Decision Brief · version 2/})).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Research linked to this review' })).toBeVisible()
+  await expect(page.getByText(dataset.name, { exact: true })).toBeVisible()
+  await expect(
+    page.getByRole('heading', {
+      name: 'Investigate acquisition quality before product direction.',
+    }),
+  ).toBeVisible()
+  await page.getByRole('tab', { name: 'Version history' }).click()
+  await expect(page.getByRole('button', { name: /Decision Brief · version 2/ })).toBeVisible()
 })
 
-test('account creation, project context, and a frozen definition work from the UI',async({page})=>{
+test('account creation, project context, and a frozen definition work from the UI', async ({
+  page,
+}) => {
   await openDemo(page)
-  await page.getByRole('button',{name:'Account and session'}).click()
-  await page.getByRole('button',{name:'Sign out',exact:true}).click()
-  await page.getByRole('button',{name:/New here/}).click()
-  await page.getByLabel('Username',{exact:true}).fill(`researcher-${Date.now()}`.replaceAll('-','_'))
-  await page.getByLabel('Password',{exact:true}).fill('A-research-only-test-phrase-2026!')
-  await page.getByRole('button',{name:'Create account',exact:true}).click()
-  await page.getByRole('button',{name:'Create your first project',exact:false}).click()
-  await page.getByLabel('Project name',{exact:true}).fill('Weekly workflow')
-  await page.getByLabel('Product promise',{exact:true}).fill('A useful weekly workflow review for small product teams.')
-  await page.getByRole('dialog').getByRole('button',{name:'Create project',exact:true}).click()
+  await page.getByRole('button', { name: 'Account and session' }).click()
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click()
+  await page.getByRole('button', { name: /New here/ }).click()
+  await page
+    .getByLabel('Username', { exact: true })
+    .fill(`researcher-${Date.now()}`.replaceAll('-', '_'))
+  await page.getByLabel('Password', { exact: true }).fill('A-research-only-test-phrase-2026!')
+  await page.getByRole('button', { name: 'Create account', exact: true }).click()
+  await page.getByRole('button', { name: 'Create your first project', exact: false }).click()
+  await page.getByLabel('Project name', { exact: true }).fill('Weekly workflow')
+  await page
+    .getByLabel('Product promise', { exact: true })
+    .fill('A useful weekly workflow review for small product teams.')
+  await page
+    .getByRole('dialog')
+    .getByRole('button', { name: 'Create project', exact: true })
+    .click()
   await expect(page.getByRole('dialog')).not.toBeVisible()
-  await page.getByRole('button',{name:'Metric definition',exact:true}).click()
+  await page.getByRole('button', { name: 'Metric definition', exact: true }).click()
   await page.getByLabel('First value event · within 7 days').fill('first_review_completed')
   await page.getByLabel('Return value event · days 21–28').fill('review_completed')
-  await page.getByText('Predeclare future review windows (optional)',{exact:true}).click()
-  await page.getByLabel('Window 1 starts (UTC)',{exact:true}).fill('2027-01-01')
-  await page.getByLabel('Window 1 ends (UTC)',{exact:true}).fill('2027-01-07')
-  await page.getByLabel('Window 2 starts (UTC)',{exact:true}).fill('2027-01-15')
-  await page.getByLabel('Window 2 ends (UTC)',{exact:true}).fill('2027-01-21')
-  await page.getByRole('checkbox',{name:/I reviewed these events/}).check()
-  await page.getByRole('button',{name:'Approve definition',exact:true}).click()
-  await expect(page.getByText('CURRENT DEFINITION · V1',{exact:true})).toBeVisible()
-  const projects=await(await page.request.get('/api/v1/projects')).json()
-  const overview=await(await page.request.get(`/api/v1/projects/${projects[0].id}/overview`)).json()
+  await page.getByText('Predeclare future review windows (optional)', { exact: true }).click()
+  await page.getByLabel('Window 1 starts (UTC)', { exact: true }).fill('2027-01-01')
+  await page.getByLabel('Window 1 ends (UTC)', { exact: true }).fill('2027-01-07')
+  await page.getByLabel('Window 2 starts (UTC)', { exact: true }).fill('2027-01-15')
+  await page.getByLabel('Window 2 ends (UTC)', { exact: true }).fill('2027-01-21')
+  await page.getByRole('checkbox', { name: /I reviewed these events/ }).check()
+  await page.getByRole('button', { name: 'Approve definition', exact: true }).click()
+  await expect(page.getByText('CURRENT DEFINITION · V1', { exact: true })).toBeVisible()
+  const projects = await (await page.request.get('/api/v1/projects')).json()
+  const overview = await (
+    await page.request.get(`/api/v1/projects/${projects[0].id}/overview`)
+  ).json()
   expect(overview.contract.config.review_windows).toHaveLength(2)
   expect(overview.assessment).toBeNull()
+  await page.getByRole('button', { name: 'Privacy & access', exact: true }).click()
+  const session = await (await page.request.get('/api/v1/session')).json()
+  await page.getByLabel('Registered username', { exact: true }).fill(session.username)
+  await page.getByRole('button', { name: 'Save access', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('Keep at least one workspace owner.')
+  await expect(page.getByText('Your role: owner', { exact: true })).toBeVisible()
 })

@@ -10,7 +10,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.core.cache import cache
 from django.db import transaction, IntegrityError
-from django.http import HttpResponse, JsonResponse
+from django.http import HttpResponse, JsonResponse, Http404
 from django.middleware.csrf import get_token
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -20,24 +20,75 @@ from ninja.files import UploadedFile
 from ninja.errors import HttpError, ValidationError
 from ninja.security import django_auth
 from . import schemas as S
-from .models import Workspace, Membership, Project, MetricContract, AnalyticsSnapshot, Assessment, Study, Concept, HumanDataset, Experiment, Job, Connection, PanelRun
-from .services import project_for, audit, create_contract, save_snapshot, enqueue, record, assessment_record
+from .models import (
+    Workspace,
+    Membership,
+    Project,
+    MetricContract,
+    AnalyticsSnapshot,
+    Assessment,
+    Study,
+    Concept,
+    HumanDataset,
+    Experiment,
+    Job,
+    Connection,
+    PanelRun,
+)
+from .services import (
+    project_for,
+    audit,
+    create_contract,
+    save_snapshot,
+    enqueue,
+    record,
+    assessment_record,
+)
 from .analysis import calculate, digest
 from .demo import seed_demo
 from .research import parse_human_csv, summarize_human
 
-api = NinjaAPI(title='ConceptBench API', version='1.0.0', auth=django_auth, docs_url='/docs' if settings.DEBUG else None)
+api = NinjaAPI(title="ConceptBench API", version="1.0.0", auth=django_auth, docs_url=None)
 
 
 @api.exception_handler(HttpError)
 def http_error(request, exc):
-    return api.create_response(request, {'error': {'code': f'http_{exc.status_code}', 'message': str(exc), 'request_id': getattr(request, 'request_id', ''), 'recovery': 'Review the request and retry.'}}, status=exc.status_code)
+    return api.create_response(
+        request,
+        {
+            "error": {
+                "code": f"http_{exc.status_code}",
+                "message": str(exc),
+                "request_id": getattr(request, "request_id", ""),
+                "recovery": "Review the request and retry.",
+            }
+        },
+        status=exc.status_code,
+    )
+
+
+@api.exception_handler(Http404)
+def not_found(request, exc):
+    return http_error(request, HttpError(404, "The resource is unavailable in this workspace."))
 
 
 @api.exception_handler(ValidationError)
 def validation_error(request, exc):
-    errors = [{'field': '.'.join(str(p) for p in e['loc']), 'message': e['msg']} for e in exc.errors]
-    return api.create_response(request, {'error': {'code': 'validation_error', 'message': 'Check the highlighted fields.', 'details': errors, 'request_id': getattr(request, 'request_id', '')}}, status=422)
+    errors = [
+        {"field": ".".join(str(p) for p in e["loc"]), "message": e["msg"]} for e in exc.errors
+    ]
+    return api.create_response(
+        request,
+        {
+            "error": {
+                "code": "validation_error",
+                "message": "Check the highlighted fields.",
+                "details": errors,
+                "request_id": getattr(request, "request_id", ""),
+            }
+        },
+        status=422,
+    )
 
 
 @api.exception_handler(ValueError)
@@ -46,125 +97,247 @@ def value_error(request, exc):
 
 
 def throttle(request, action, limit=20):
-    # ponytail: process-local limiter for single-node pilots; use shared cache before scaling workers.
-    key = digest([action, request.META.get('REMOTE_ADDR', ''), timezone.now().strftime('%Y%m%d%H')])
+    # ponytail: per-process throttle; use a proxy/shared limiter before exposing a public installation.
+    key = digest([action, request.META.get("REMOTE_ADDR", ""), timezone.now().strftime("%Y%m%d%H")])
     cache.add(key, 0, 3600)
     count = cache.incr(key)
     if count > limit:
-        raise HttpError(429, 'Too many attempts. Try again in an hour.')
+        raise HttpError(429, "Too many attempts. Try again in an hour.")
 
 
-@api.get('/session', auth=None)
+@api.get("/session", auth=None)
 def session(request):
-    return {'authenticated': request.user.is_authenticated, 'username': request.user.username if request.user.is_authenticated else None, 'csrf_token': get_token(request), 'demo_enabled': settings.ALLOW_DEMO, 'registration_enabled': settings.ALLOW_REGISTRATION, 'model_enabled': bool(settings.MODEL_API_KEY and settings.MODEL_NAME), 'version': '0.1.0'}
+    return {
+        "authenticated": request.user.is_authenticated,
+        "username": request.user.username if request.user.is_authenticated else None,
+        "csrf_token": get_token(request),
+        "demo_enabled": settings.ALLOW_DEMO,
+        "registration_enabled": settings.ALLOW_REGISTRATION,
+        "model_enabled": bool(settings.MODEL_API_KEY and settings.MODEL_NAME),
+        "version": "0.1.0",
+    }
 
 
-@api.post('/auth/demo', auth=None)
+@api.post("/auth/demo", auth=None)
 @csrf_protect
 def demo_login(request):
     if not settings.ALLOW_DEMO:
-        raise HttpError(403, 'Demo sessions are disabled on this installation.')
+        raise HttpError(403, "Demo sessions are disabled on this installation.")
     if request.user.is_authenticated:
-        return JsonResponse({'ok': True})
-    throttle(request, 'demo', 20)
+        return JsonResponse({"ok": True})
+    throttle(request, "demo", 20)
     with transaction.atomic():
-        user = get_user_model().objects.create_user(username='demo-'+uuid.uuid4().hex, first_name='Alex')
+        user = get_user_model().objects.create_user(
+            username="demo-" + uuid.uuid4().hex, first_name="Alex"
+        )
         seed_demo(user)
     login(request, user)
-    return JsonResponse({'ok': True, 'csrf_token': get_token(request)})
+    return JsonResponse({"ok": True, "csrf_token": get_token(request)})
 
 
-@api.post('/auth/login', auth=None)
+@api.post("/auth/login", auth=None)
 @csrf_protect
 def sign_in(request, data: S.Credentials):
-    throttle(request, 'login')
+    throttle(request, "login")
     user = authenticate(request, username=data.username, password=data.password)
     if user is None:
-        raise HttpError(401, 'The username or password is incorrect.')
+        raise HttpError(401, "The username or password is incorrect.")
     login(request, user)
-    return JsonResponse({'ok': True, 'csrf_token': get_token(request)})
+    return JsonResponse({"ok": True, "csrf_token": get_token(request)})
 
 
-@api.post('/auth/register', auth=None)
+@api.post("/auth/register", auth=None)
 @csrf_protect
 def register(request, data: S.Credentials):
     if not settings.ALLOW_REGISTRATION:
-        raise HttpError(403, 'Registration is disabled. Ask the installation owner for an account.')
-    throttle(request, 'register', 10)
+        raise HttpError(403, "Registration is disabled. Ask the installation owner for an account.")
+    throttle(request, "register", 10)
     user = get_user_model()(username=data.username)
     try:
         validate_password(data.password, user)
     except DjangoValidationError as exc:
-        raise HttpError(422, ' '.join(exc.messages))
+        raise HttpError(422, " ".join(exc.messages))
     try:
         with transaction.atomic():
             user.set_password(data.password)
             user.save()
-            workspace = Workspace.objects.create(name=f'{user.username}’s workspace')
-            Membership.objects.create(workspace=workspace, user=user, role='owner', can_export=True)
+            workspace = Workspace.objects.create(name=f"{user.username}’s workspace")
+            Membership.objects.create(workspace=workspace, user=user, role="owner", can_export=True)
     except IntegrityError:
-        raise HttpError(409, 'That username is already in use.')
+        raise HttpError(409, "That username is already in use.")
     login(request, user)
-    return JsonResponse({'ok': True, 'csrf_token': get_token(request)})
+    return JsonResponse({"ok": True, "csrf_token": get_token(request)})
 
 
-@api.post('/auth/logout')
+@api.post("/auth/logout")
 def sign_out(request):
     logout(request)
-    return {'ok': True}
+    return {"ok": True}
 
 
 def project_record(project):
-    return record(project, 'id name promise audience concern cadence is_demo raw_retention_days aggregate_retention_days run_budget_limit workspace_id')
+    return record(
+        project,
+        "id name promise audience concern cadence is_demo raw_retention_days aggregate_retention_days run_budget_limit workspace_id",
+    )
 
 
-@api.get('/projects')
+@api.get("/projects/{project_id}/members")
+def members(request, project_id: uuid.UUID):
+    project = project_for(request.user, project_id, owner=True)
+    return [
+        {
+            "user_id": m.user_id,
+            "username": m.user.username,
+            "role": m.role,
+            "can_export": m.can_export,
+        }
+        for m in project.workspace.memberships.select_related("user").order_by("user__username")
+    ]
+
+
+@api.put("/projects/{project_id}/members")
+@transaction.atomic
+def set_member(request, project_id: uuid.UUID, data: S.MemberIn):
+    project = project_for(request.user, project_id, owner=True)
+    Workspace.objects.select_for_update().get(id=project.workspace_id)
+    project_for(request.user, project_id, owner=True)
+    user = get_object_or_404(get_user_model(), username=data.username, is_active=True)
+    existing = project.workspace.memberships.filter(user=user).first()
+    if (
+        existing
+        and existing.role == "owner"
+        and data.role != "owner"
+        and not project.workspace.memberships.filter(role="owner").exclude(user=user).exists()
+    ):
+        raise HttpError(409, "Keep at least one workspace owner.")
+    membership, _ = Membership.objects.update_or_create(
+        workspace=project.workspace,
+        user=user,
+        defaults={"role": data.role, "can_export": data.can_export},
+    )
+    audit(request.user, project, "membership.set", membership)
+    return {"ok": True}
+
+
+@api.delete("/projects/{project_id}/members/{user_id}")
+@transaction.atomic
+def remove_member(request, project_id: uuid.UUID, user_id: int):
+    project = project_for(request.user, project_id, owner=True)
+    Workspace.objects.select_for_update().get(id=project.workspace_id)
+    project_for(request.user, project_id, owner=True)
+    membership = get_object_or_404(Membership, workspace=project.workspace, user_id=user_id)
+    if (
+        membership.role == "owner"
+        and not project.workspace.memberships.filter(role="owner").exclude(user_id=user_id).exists()
+    ):
+        raise HttpError(409, "Keep at least one workspace owner.")
+    audit(request.user, project, "membership.remove", membership)
+    membership.delete()
+    return {"ok": True}
+
+
+@api.get("/projects")
 def projects(request):
-    return [project_record(p) for p in Project.objects.filter(workspace__memberships__user=request.user, deleted_at__isnull=True).order_by('created_at')]
+    return [
+        project_record(p)
+        for p in Project.objects.filter(
+            workspace__memberships__user=request.user, deleted_at__isnull=True
+        ).order_by("created_at")
+    ]
 
 
-@api.post('/projects')
+@api.post("/projects")
 def create_project(request, data: S.ProjectIn):
-    membership = Membership.objects.filter(user=request.user, role__in=['owner', 'editor']).first()
+    membership = Membership.objects.filter(user=request.user, role__in=["owner", "editor"]).first()
     if not membership:
-        raise HttpError(403, 'An owner or editor membership is required.')
+        raise HttpError(403, "An owner or editor membership is required.")
     project = Project.objects.create(workspace=membership.workspace, **data.model_dump())
-    audit(request.user, project, 'project.create', project)
+    audit(request.user, project, "project.create", project)
     return project_record(project)
 
 
 def experiment_record(experiment):
-    return record(experiment, 'id assessment_id title hypothesis population assignment_unit design primary_metric minimum_effect guardrails stopping_rule instrumentation_check owner_name review_date status outcome created_at')
+    return record(
+        experiment,
+        "id assessment_id title hypothesis population assignment_unit design primary_metric minimum_effect guardrails stopping_rule instrumentation_check owner_name review_date status outcome created_at",
+    )
 
 
 def study_record(study):
-    datasets = list(study.datasets.order_by('-created_at'))
-    concepts = list(study.concepts.order_by('created_at'))
+    datasets = list(study.datasets.order_by("-created_at"))
+    concepts = list(study.concepts.order_by("created_at"))
     latest = datasets[0] if datasets else None
-    return {**record(study, 'id title audience question hypothesis version created_at'), 'concepts': [record(c, 'id name description version group split') for c in concepts], 'datasets': [{**record(d, 'id name summary metadata expired created_at expires_at'), 'response_count': sum(s['n'] for s in d.summary.values())} for d in datasets], 'human_summary': latest.summary if latest else {}, 'runs': [{**record(r, 'id config budget spent reserved uncertain_cost summary created_at'), 'job': record(r.job, 'id status progress error')} for r in study.runs.select_related('job').order_by('-created_at')]}
+    return {
+        **record(study, "id title audience question hypothesis version created_at"),
+        "concepts": [record(c, "id name description version group split") for c in concepts],
+        "datasets": [
+            {
+                **record(d, "id name summary metadata expired created_at expires_at"),
+                "response_count": sum(s["n"] for s in d.summary.values()),
+            }
+            for d in datasets
+        ],
+        "human_summary": latest.summary if latest else {},
+        "runs": [
+            {
+                **record(r, "id config budget spent reserved uncertain_cost summary created_at"),
+                "job": record(r.job, "id status progress error"),
+            }
+            for r in study.runs.select_related("job").order_by("-created_at")
+        ],
+    }
 
 
-@api.get('/projects/{project_id}/overview')
+@api.get("/projects/{project_id}/overview")
 def overview(request, project_id: uuid.UUID):
     project = project_for(request.user, project_id)
     membership = Membership.objects.get(workspace=project.workspace, user=request.user)
-    latest = project.assessments.order_by('-version').first()
-    contract = project.contracts.order_by('-version').first()
+    latest = project.assessments.order_by("-version").first()
+    contract = project.contracts.order_by("-version").first()
     connection = Connection.objects.filter(project=project).first()
-    return {'project': project_record(project), 'role': membership.role, 'can_export': membership.role != 'viewer' or membership.can_export, 'assessment': assessment_record(latest) if latest else None, 'snapshot_versions': [record(s,'id collected_at analysis_cutoff source contract_id') for s in project.snapshots.order_by('-created_at')], 'assessment_versions': [record(a, 'id version created_at') for a in project.assessments.order_by('-version')], 'contract': record(contract, 'id version config content_hash created_at') if contract else None, 'connection': record(connection, 'id region external_project_id endpoints status last_error last_refresh') if connection else None, 'studies': [study_record(s) for s in project.studies.order_by('created_at')], 'experiments': [experiment_record(e) for e in project.experiments.order_by('-created_at')], 'jobs': [record(j, 'id kind status progress error created_at') for j in project.jobs.order_by('-created_at')[:10]]}
+    return {
+        "project": project_record(project),
+        "role": membership.role,
+        "can_export": membership.role != "viewer" or membership.can_export,
+        "assessment": assessment_record(latest) if latest else None,
+        "snapshot_versions": [
+            record(s, "id collected_at analysis_cutoff source contract_id")
+            for s in project.snapshots.order_by("-created_at")
+        ],
+        "assessment_versions": [
+            record(a, "id version created_at") for a in project.assessments.order_by("-version")
+        ],
+        "contract": (
+            record(contract, "id version config content_hash created_at") if contract else None
+        ),
+        "connection": (
+            record(
+                connection, "id region external_project_id endpoints status last_error last_refresh"
+            )
+            if connection
+            else None
+        ),
+        "studies": [study_record(s) for s in project.studies.order_by("created_at")],
+        "experiments": [experiment_record(e) for e in project.experiments.order_by("-created_at")],
+        "jobs": [
+            record(j, "id kind status progress error created_at")
+            for j in project.jobs.order_by("-created_at")[:10]
+        ],
+    }
 
 
-@api.patch('/projects/{project_id}')
+@api.patch("/projects/{project_id}")
 def edit_project(request, project_id: uuid.UUID, data: S.ProjectIn):
     project = project_for(request.user, project_id, write=True)
     for field, value in data.model_dump().items():
         setattr(project, field, value)
     project.save()
-    audit(request.user, project, 'project.edit', project)
+    audit(request.user, project, "project.edit", project)
     return project_record(project)
 
 
-@api.put('/projects/{project_id}/retention')
+@api.put("/projects/{project_id}/retention")
 def retention(request, project_id: uuid.UUID, data: S.RetentionIn):
     project = project_for(request.user, project_id, owner=True)
     for field, value in data.model_dump().items():
@@ -174,222 +347,357 @@ def retention(request, project_id: uuid.UUID, data: S.RetentionIn):
         deadline = dataset.created_at + timedelta(days=project.raw_retention_days)
         if deadline < dataset.expires_at:
             dataset.expires_at = deadline
-            dataset.save(update_fields=['expires_at'])
-    audit(request.user, project, 'retention.edit', project)
+            dataset.save(update_fields=["expires_at"])
+    audit(request.user, project, "retention.edit", project)
     return project_record(project)
 
 
-@api.post('/projects/{project_id}/metric-contracts')
+@api.post("/projects/{project_id}/metric-contracts")
 def approve_contract(request, project_id: uuid.UUID, data: S.ContractIn):
     project = project_for(request.user, project_id, write=True)
-    contract = create_contract(request.user, project, data.model_dump(mode='json'))
-    return record(contract, 'id version config content_hash')
+    contract = create_contract(request.user, project, data.model_dump(mode="json"))
+    return record(contract, "id version config content_hash")
 
 
-@api.post('/projects/{project_id}/analytics/import')
+@api.post("/projects/{project_id}/analytics/import")
 def import_aggregates(request, project_id: uuid.UUID, data: S.SnapshotIn):
     project = project_for(request.user, project_id, write=True)
     contract = get_object_or_404(MetricContract, id=data.contract_id, project=project)
-    return assessment_record(save_snapshot(request.user, project, contract, data.model_dump(mode='json'), 'csv'))
+    return assessment_record(
+        save_snapshot(request.user, project, contract, data.model_dump(mode="json"), "csv")
+    )
 
 
-@api.get('/snapshots/{snapshot_id}')
+@api.get("/snapshots/{snapshot_id}")
 def snapshot_source(request, snapshot_id: uuid.UUID):
     snapshot = get_object_or_404(AnalyticsSnapshot, id=snapshot_id)
     project_for(request.user, snapshot.project_id)
-    return {**record(snapshot, 'id source rows quality source_metadata content_hash analysis_cutoff latest_event_at collected_at'), 'rows': calculate(snapshot.rows, snapshot.analysis_cutoff)['cohorts'], 'contract': record(snapshot.contract, 'id version config content_hash'), 'exclusions': 'Internal traffic excluded; incomplete windows excluded separately for A7 and W4.', 'counting_unit': 'identified_user'}
+    return {
+        **record(
+            snapshot,
+            "id source rows quality source_metadata content_hash analysis_cutoff latest_event_at collected_at",
+        ),
+        "rows": calculate(snapshot.rows, snapshot.analysis_cutoff)["cohorts"],
+        "contract": record(snapshot.contract, "id version config content_hash"),
+        "exclusions": "Internal traffic excluded; incomplete windows excluded separately for A7 and W4.",
+        "counting_unit": "identified_user",
+    }
 
 
-@api.get('/assessments/{assessment_id}')
+@api.get("/assessments/{assessment_id}")
 def get_assessment(request, assessment_id: uuid.UUID):
     assessment = get_object_or_404(Assessment, id=assessment_id)
     project_for(request.user, assessment.project_id)
     return assessment_record(assessment)
 
 
-@api.post('/assessments/{assessment_id}/revisions')
+@api.post("/assessments/{assessment_id}/revisions")
 @transaction.atomic
 def revise_brief(request, assessment_id: uuid.UUID, data: S.BriefEdit):
     previous = get_object_or_404(Assessment, id=assessment_id)
     project = project_for(request.user, previous.project_id, write=True)
     Project.objects.select_for_update().get(id=project.id)
-    version = project.assessments.order_by('-version').first().version+1
-    revision = Assessment.objects.create(project=project, snapshot=previous.snapshot, version=version, brief=previous.brief, **data.model_dump())
-    audit(request.user, project, 'brief.revise', revision)
+    version = project.assessments.order_by("-version").first().version + 1
+    revision = Assessment.objects.create(
+        project=project,
+        snapshot=previous.snapshot,
+        version=version,
+        brief=previous.brief,
+        **data.model_dump(),
+    )
+    audit(request.user, project, "brief.revise", revision)
     return assessment_record(revision)
 
 
-@api.get('/assessments/{assessment_id}/export')
-def export_brief(request, assessment_id: uuid.UUID, format: str = 'markdown'):
+@api.get("/assessments/{assessment_id}/export")
+def export_brief(request, assessment_id: uuid.UUID, format: str = "markdown"):
     assessment = get_object_or_404(Assessment, id=assessment_id)
     project = project_for(request.user, assessment.project_id, export=True)
-    if format not in ['markdown', 'json']:
-        raise HttpError(422, 'Choose markdown or json.')
+    if format not in ["markdown", "json"]:
+        raise HttpError(422, "Choose markdown or json.")
     data = assessment_record(assessment)
-    if format == 'json':
+    if format == "json":
         from django.core.serializers.json import DjangoJSONEncoder
+
         content = json.dumps(data, indent=2, cls=DjangoJSONEncoder)
     else:
         b = assessment.brief
-        lines = [f'# Decision Brief — {project.name}', f'\nVersion {assessment.version} · {assessment.created_at.isoformat()}', f'\nOwner: {assessment.owner_name} · Review: {assessment.review_date}', '\n**Fabricated demonstration data**' if b['synthetic'] else '\nPrivate evidence review', f'\n## {b["title"]}', b['summary'], '\n## Evidence']
-        for e in b['evidence']:
-            lines.append(f'\n- {e["label"]} [{e["id"]}]: {e["earlier"]["numerator"]}/{e["earlier"]["denominator"]} → {e["later"]["numerator"]}/{e["later"]["denominator"]}. Change {e["change"]["pp"]} pp; 95% CI {e["change"]["interval"]}.')
-        for label, values in [('Contradictory evidence', b['contradictions']), ('Missing information', b['missing']), ('Limitations', b['limitations'])]:
-            lines.extend([f'\n## {label}', *['- '+v for v in values]])
-        for research in b.get('research_evidence', []):
-            lines.extend(['\n## Linked research', f'{research["name"]} [{research["id"]}] · {research["type"]} · {research["response_count"]} responses', research.get('recruitment_source','')])
-        for intervention in b.get('intervention_evidence', []):
-            lines.extend(['\n## Reviewed intervention', f'{intervention["title"]} [{intervention["id"]}]', json.dumps(intervention['outcome'])])
-        lines.extend(['\n## What would change the recommendation', b['what_would_change'], '\n## Analyst notes', assessment.analyst_note or 'No analyst notes.', f'\nRule version: {b["rule_version"]}; snapshot: {assessment.snapshot_id}.'])
-        content = '\n'.join(lines)
-    audit(request.user, project, 'brief.export', assessment)
-    response = HttpResponse(content, content_type='application/json' if format == 'json' else 'text/markdown; charset=utf-8')
-    response['Content-Disposition'] = f'attachment; filename="conceptbench-brief-v{assessment.version}.{ "json" if format == "json" else "md"}"'
+        lines = [
+            f"# Decision Brief — {project.name}",
+            f"\nVersion {assessment.version} · {assessment.created_at.isoformat()}",
+            f"\nOwner: {assessment.owner_name} · Review: {assessment.review_date}",
+            (
+                "\n**Fabricated demonstration data**"
+                if b["synthetic"]
+                else "\nPrivate evidence review"
+            ),
+            f'\n## {b["title"]}',
+            b["summary"],
+            "\n## Evidence",
+        ]
+        for e in b["evidence"]:
+            lines.append(
+                f'\n- {e["label"]} [{e["id"]}]: {e["earlier"]["numerator"]}/{e["earlier"]["denominator"]} → {e["later"]["numerator"]}/{e["later"]["denominator"]}. Change {e["change"]["pp"]} pp; 95% CI {e["change"]["interval"]}.'
+            )
+        for label, values in [
+            ("Contradictory evidence", b["contradictions"]),
+            ("Missing information", b["missing"]),
+            ("Limitations", b["limitations"]),
+        ]:
+            lines.extend([f"\n## {label}", *["- " + v for v in values]])
+        for research in b.get("research_evidence", []):
+            lines.extend(
+                [
+                    "\n## Linked research",
+                    f'{research["name"]} [{research["id"]}] · {research["type"]} · {research["response_count"]} responses',
+                    research.get("recruitment_source", ""),
+                ]
+            )
+        for intervention in b.get("intervention_evidence", []):
+            lines.extend(
+                [
+                    "\n## Reviewed intervention",
+                    f'{intervention["title"]} [{intervention["id"]}]',
+                    json.dumps(intervention["outcome"]),
+                ]
+            )
+        lines.extend(
+            [
+                "\n## What would change the recommendation",
+                b["what_would_change"],
+                "\n## Analyst notes",
+                assessment.analyst_note or "No analyst notes.",
+                f'\nRule version: {b["rule_version"]}; snapshot: {assessment.snapshot_id}.',
+            ]
+        )
+        content = "\n".join(lines)
+    audit(request.user, project, "brief.export", assessment)
+    response = HttpResponse(
+        content,
+        content_type="application/json" if format == "json" else "text/markdown; charset=utf-8",
+    )
+    response["Content-Disposition"] = (
+        f'attachment; filename="conceptbench-brief-v{assessment.version}.{ "json" if format == "json" else "md"}"'
+    )
     return response
 
 
-@api.post('/projects/{project_id}/studies')
+@api.post("/projects/{project_id}/studies")
 @transaction.atomic
 def create_study(request, project_id: uuid.UUID, data: S.StudyIn):
     project = project_for(request.user, project_id, write=True)
-    study = Study.objects.create(project=project, **data.model_dump(exclude={'concepts'}))
+    study = Study.objects.create(project=project, **data.model_dump(exclude={"concepts"}))
     for concept in data.concepts:
         Concept.objects.create(study=study, **concept.model_dump())
-    audit(request.user, project, 'study.create', study)
+    audit(request.user, project, "study.create", study)
     return study_record(study)
 
 
-@api.post('/studies/{study_id}/human-data')
-def import_human(request, study_id: uuid.UUID, file: UploadedFile = File(...), recruitment_source: str = Form(...), consent: bool = Form(...)):
+@api.post("/studies/{study_id}/human-data")
+def import_human(
+    request,
+    study_id: uuid.UUID,
+    file: UploadedFile = File(...),
+    recruitment_source: str = Form(...),
+    consent: bool = Form(...),
+):
     study = get_object_or_404(Study, id=study_id)
     project = project_for(request.user, study.project_id, write=True)
     if not consent or not 3 <= len(recruitment_source) <= 1000:
-        raise HttpError(422, 'Confirm consent and describe how respondents were recruited.')
-    if file.size > 5*1024*1024:
-        raise HttpError(413, 'The CSV exceeds 5 MB.')
+        raise HttpError(422, "Confirm consent and describe how respondents were recruited.")
+    if file.size > 5 * 1024 * 1024:
+        raise HttpError(413, "The CSV exceeds 5 MB.")
     rows, errors = parse_human_csv(file.read(), study.id, {str(c.id) for c in study.concepts.all()})
     if errors:
-        return api.create_response(request, {'error': {'code': 'csv_rows_invalid', 'message': 'Correct the CSV rows and import again. No data was saved.', 'details': errors, 'request_id': request.request_id}}, status=422)
-    dataset = HumanDataset.objects.create(study=study, name=Path(file.name).name[:180], rows=rows, summary=summarize_human(rows), metadata={'recruitment_source': recruitment_source, 'consent': True, 'synthetic': False, 'question_id': rows[0]['question_id'], 'repeated_respondents': len({r['respondent_id'] for r in rows}) < len(rows)}, content_hash=digest(rows), expires_at=timezone.now()+timedelta(days=project.raw_retention_days))
-    audit(request.user, project, 'human.import', dataset)
+        return api.create_response(
+            request,
+            {
+                "error": {
+                    "code": "csv_rows_invalid",
+                    "message": "Correct the CSV rows and import again. No data was saved.",
+                    "details": errors,
+                    "request_id": request.request_id,
+                }
+            },
+            status=422,
+        )
+    dataset = HumanDataset.objects.create(
+        study=study,
+        name=Path(file.name).name[:180],
+        rows=rows,
+        summary=summarize_human(rows),
+        metadata={
+            "recruitment_source": recruitment_source,
+            "consent": True,
+            "synthetic": False,
+            "question_id": rows[0]["question_id"],
+            "repeated_respondents": len({r["respondent_id"] for r in rows}) < len(rows),
+        },
+        content_hash=digest(rows),
+        expires_at=timezone.now() + timedelta(days=project.raw_retention_days),
+    )
+    audit(request.user, project, "human.import", dataset)
     return study_record(study)
 
 
-@api.get('/studies/{study_id}/human-template')
+@api.get("/studies/{study_id}/human-template")
 def human_template(request, study_id: uuid.UUID):
     study = get_object_or_404(Study, id=study_id)
     project_for(request.user, study.project_id, export=True)
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(['study_id', 'concept_version', 'respondent_id', 'question_id', 'rating', 'collected_at', 'comment', 'segment'])
+    writer.writerow(
+        [
+            "study_id",
+            "concept_version",
+            "respondent_id",
+            "question_id",
+            "rating",
+            "collected_at",
+            "comment",
+            "segment",
+        ]
+    )
     for concept in study.concepts.all():
-        writer.writerow([str(study.id), str(concept.id), 'anonymous-001', 'intent', '', timezone.now().isoformat(), '', ''])
-    response = HttpResponse(output.getvalue(), content_type='text/csv')
-    response['Content-Disposition'] = 'attachment; filename="conceptbench-human-template.csv"'
+        writer.writerow(
+            [
+                str(study.id),
+                str(concept.id),
+                "anonymous-001",
+                "intent",
+                "",
+                timezone.now().isoformat(),
+                "",
+                "",
+            ]
+        )
+    response = HttpResponse(output.getvalue(), content_type="text/csv")
+    response["Content-Disposition"] = 'attachment; filename="conceptbench-human-template.csv"'
     return response
 
 
-@api.delete('/datasets/{dataset_id}')
+@api.delete("/datasets/{dataset_id}")
 def delete_dataset(request, dataset_id: uuid.UUID):
     dataset = get_object_or_404(HumanDataset, id=dataset_id)
     project = project_for(request.user, dataset.study.project_id, owner=True)
-    audit(request.user, project, 'human.delete', dataset)
+    audit(request.user, project, "human.delete", dataset)
     for assessment in project.assessments.all():
-        if str(dataset.id) in [r['id'] for r in assessment.brief.get('research_evidence',[])]:
+        if str(dataset.id) in [r["id"] for r in assessment.brief.get("research_evidence", [])]:
             assessment.delete()
     # Comparison summaries contain derivatives of the dataset and must be recomputed.
     dataset.study.runs.update(summary={})
     dataset.delete()
-    return {'ok': True}
+    return {"ok": True}
 
 
-@api.post('/assessments/{assessment_id}/experiments')
+@api.post("/assessments/{assessment_id}/experiments")
 def create_experiment(request, assessment_id: uuid.UUID, data: S.ExperimentIn):
     assessment = get_object_or_404(Assessment, id=assessment_id)
     project = project_for(request.user, assessment.project_id, write=True)
-    experiment = Experiment.objects.create(project=project, assessment=assessment, **data.model_dump())
-    audit(request.user, project, 'experiment.create', experiment)
+    experiment = Experiment.objects.create(
+        project=project, assessment=assessment, **data.model_dump()
+    )
+    audit(request.user, project, "experiment.create", experiment)
     return experiment_record(experiment)
 
 
-@api.put('/experiments/{experiment_id}')
+@api.put("/experiments/{experiment_id}")
+@transaction.atomic
 def update_experiment(request, experiment_id: uuid.UUID, data: S.ExperimentIn):
-    experiment = get_object_or_404(Experiment, id=experiment_id)
+    experiment = get_object_or_404(Experiment.objects.select_for_update(), id=experiment_id)
     project = project_for(request.user, experiment.project_id, write=True)
-    if experiment.status == 'complete':
-        raise HttpError(409, 'Completed experiment specifications are frozen.')
+    if experiment.status != "planned":
+        raise HttpError(
+            409,
+            "Experiment specifications are frozen after starting. Create a new plan to change the test.",
+        )
     for field, value in data.model_dump().items():
         setattr(experiment, field, value)
     experiment.save()
-    audit(request.user, project, 'experiment.edit', experiment)
+    audit(request.user, project, "experiment.edit", experiment)
     return experiment_record(experiment)
 
 
-@api.post('/experiments/{experiment_id}/start')
+@api.post("/experiments/{experiment_id}/start")
+@transaction.atomic
 def start_experiment(request, experiment_id: uuid.UUID):
-    experiment = get_object_or_404(Experiment, id=experiment_id)
+    experiment = get_object_or_404(Experiment.objects.select_for_update(), id=experiment_id)
     project = project_for(request.user, experiment.project_id, write=True)
-    if experiment.status != 'planned':
-        raise HttpError(409, 'Only a planned experiment can be started.')
-    experiment.status = 'running'
-    experiment.save(update_fields=['status'])
-    audit(request.user, project, 'experiment.start', experiment)
+    if experiment.status != "planned":
+        raise HttpError(409, "Only a planned experiment can be started.")
+    experiment.status = "running"
+    experiment.save(update_fields=["status"])
+    audit(request.user, project, "experiment.start", experiment)
     return experiment_record(experiment)
 
 
-@api.post('/experiments/{experiment_id}/outcomes')
+@api.post("/experiments/{experiment_id}/outcomes")
+@transaction.atomic
 def record_outcome(request, experiment_id: uuid.UUID, data: S.OutcomeIn):
-    experiment = get_object_or_404(Experiment, id=experiment_id)
+    experiment = get_object_or_404(Experiment.objects.select_for_update(), id=experiment_id)
     project = project_for(request.user, experiment.project_id, write=True)
-    if experiment.status != 'running':
-        raise HttpError(409, 'Start the experiment before recording its outcome.')
-    experiment.outcome = {**data.model_dump(), 'recorded_at': timezone.now().isoformat(), 'recorded_by': request.user.username}
-    experiment.status = 'complete'
-    experiment.save(update_fields=['outcome', 'status'])
-    audit(request.user, project, 'experiment.outcome', experiment)
+    if experiment.status != "running":
+        raise HttpError(409, "Start the experiment before recording its outcome.")
+    experiment.outcome = {
+        **data.model_dump(),
+        "recorded_at": timezone.now().isoformat(),
+        "recorded_by": request.user.username,
+    }
+    experiment.status = "complete"
+    experiment.save(update_fields=["outcome", "status"])
+    audit(request.user, project, "experiment.outcome", experiment)
     return experiment_record(experiment)
 
 
-@api.get('/experiments/{experiment_id}/export')
+@api.get("/experiments/{experiment_id}/export")
 def export_experiment(request, experiment_id: uuid.UUID):
     experiment = get_object_or_404(Experiment, id=experiment_id)
     project_for(request.user, experiment.project_id, export=True)
     from django.core.serializers.json import DjangoJSONEncoder
-    response = HttpResponse(json.dumps(experiment_record(experiment), cls=DjangoJSONEncoder, indent=2), content_type='application/json')
-    response['Content-Disposition'] = 'attachment; filename="conceptbench-experiment.json"'
+
+    response = HttpResponse(
+        json.dumps(experiment_record(experiment), cls=DjangoJSONEncoder, indent=2),
+        content_type="application/json",
+    )
+    response["Content-Disposition"] = 'attachment; filename="conceptbench-experiment.json"'
     return response
 
 
-@api.get('/jobs/{job_id}')
+@api.get("/jobs/{job_id}")
 def get_job(request, job_id: uuid.UUID):
     job = get_object_or_404(Job, id=job_id)
     project_for(request.user, job.project_id)
-    return record(job, 'id kind status attempts progress cancel_requested error result created_at')
+    return record(job, "id kind status attempts progress cancel_requested error result created_at")
 
 
-@api.post('/jobs/{job_id}/cancel')
+@api.post("/jobs/{job_id}/cancel")
 def cancel_job(request, job_id: uuid.UUID):
     job = get_object_or_404(Job, id=job_id)
     project = project_for(request.user, job.project_id, write=True)
     Job.objects.filter(id=job.id).update(cancel_requested=True)
-    Job.objects.filter(id=job.id, status='queued').update(status='cancelled')
-    audit(request.user, project, 'job.cancel', job)
-    return {'ok': True}
+    Job.objects.filter(id=job.id, status="queued").update(status="cancelled")
+    audit(request.user, project, "job.cancel", job)
+    return {"ok": True}
 
 
-@api.delete('/connections/{connection_id}')
+@api.delete("/connections/{connection_id}")
 @transaction.atomic
 def disconnect(request, connection_id: uuid.UUID):
     connection = get_object_or_404(Connection, id=connection_id)
     project = project_for(request.user, connection.project_id, owner=True)
     Project.objects.select_for_update().get(id=project.id)
-    project.jobs.filter(kind='posthog_refresh', status__in=['queued', 'running']).update(cancel_requested=True)
-    audit(request.user, project, 'connection.disconnect', connection)
+    project.jobs.filter(kind="posthog_refresh", status__in=["queued", "running"]).update(
+        cancel_requested=True
+    )
+    audit(request.user, project, "connection.disconnect", connection)
     connection.delete()
-    return {'ok': True, 'message': 'Local credential deleted. Revoke the personal API key in PostHog settings.'}
+    return {
+        "ok": True,
+        "message": "Local credential deleted. Revoke the personal API key in PostHog settings.",
+    }
 
 
-@api.delete('/projects/{project_id}')
+@api.delete("/projects/{project_id}")
 @transaction.atomic
 def delete_project(request, project_id: uuid.UUID):
     project = project_for(request.user, project_id, owner=True)
@@ -398,84 +706,117 @@ def delete_project(request, project_id: uuid.UUID):
     Connection.objects.filter(project=project).delete()
     project.jobs.update(cancel_requested=True)
     project.delete()
-    return {'ok': True, 'message': 'Project and derived application data deleted. Backups expire under the deployment retention policy.'}
+    return {
+        "ok": True,
+        "message": "Project and derived application data deleted. Backups expire under the deployment retention policy.",
+    }
 
 
-@api.get('/templates/aggregates')
+@api.get("/templates/aggregates")
 def aggregate_template(request):
-    fixture = json.loads((settings.BASE_DIR / 'demo/acquisition-mix.json').read_text())
+    fixture = json.loads((settings.BASE_DIR / "demo/acquisition-mix.json").read_text())
     output = io.StringIO()
     from .posthog import COLUMNS
+
     writer = csv.DictWriter(output, fieldnames=COLUMNS)
     writer.writeheader()
-    writer.writerows(fixture['rows'])
-    response = HttpResponse(output.getvalue(), content_type='text/csv')
-    response['Content-Disposition'] = 'attachment; filename="conceptbench-aggregate-example-FABRICATED.csv"'
+    writer.writerows(fixture["rows"])
+    response = HttpResponse(output.getvalue(), content_type="text/csv")
+    response["Content-Disposition"] = (
+        'attachment; filename="conceptbench-aggregate-example-FABRICATED.csv"'
+    )
     return response
 
 
-@api.post('/projects/{project_id}/analytics/csv')
-def aggregate_csv(request, project_id: uuid.UUID, file: UploadedFile = File(...), metadata: str = Form(...)):
+@api.post("/projects/{project_id}/analytics/csv")
+def aggregate_csv(
+    request, project_id: uuid.UUID, file: UploadedFile = File(...), metadata: str = Form(...)
+):
     project = project_for(request.user, project_id, write=True)
-    if file.size > 5*1024*1024:
-        raise HttpError(413, 'The CSV exceeds 5 MB.')
+    if file.size > 5 * 1024 * 1024:
+        raise HttpError(413, "The CSV exceeds 5 MB.")
     try:
         meta = json.loads(metadata)
         if not isinstance(meta, dict):
-            raise ValueError('Metadata must be an object.')
-        reader = csv.DictReader(io.StringIO(file.read().decode('utf-8-sig')))
+            raise ValueError("Metadata must be an object.")
+        reader = csv.DictReader(io.StringIO(file.read().decode("utf-8-sig")))
         from .posthog import COLUMNS
+
         if reader.fieldnames != COLUMNS:
-            raise HttpError(422, 'Use the exact aggregate template columns and order.')
+            raise HttpError(422, "Use the exact aggregate template columns and order.")
         rows = []
         for index, row in enumerate(reader, 2):
             if index > 2001:
-                raise HttpError(422, 'Reduce the import to 2,000 aggregate rows.')
+                raise HttpError(422, "Reduce the import to 2,000 aggregate rows.")
             if None in row or any(v is None for v in row.values()):
-                raise HttpError(422, f'Row {index}: column count does not match the header.')
-            for key in ['signups', 'activated', 'retained', 'retained_activated']:
+                raise HttpError(422, f"Row {index}: column count does not match the header.")
+            for key in ["signups", "activated", "retained", "retained_activated"]:
                 if not row[key].isdigit():
-                    raise HttpError(422, f'Row {index}: {key} must be a nonnegative integer.')
+                    raise HttpError(422, f"Row {index}: {key} must be a nonnegative integer.")
                 row[key] = int(row[key])
             rows.append(row)
-        parsed = S.SnapshotIn(**{**meta, 'rows': rows})
+        parsed = S.SnapshotIn(**{**meta, "rows": rows})
     except (json.JSONDecodeError, UnicodeDecodeError):
-        raise HttpError(422, 'Use a valid UTF-8 CSV and JSON metadata.')
+        raise HttpError(422, "Use a valid UTF-8 CSV and JSON metadata.")
     except ValueError:
-        raise HttpError(422, 'The aggregate schema or metadata is invalid. Check counts, dates, and quality declarations.')
+        raise HttpError(
+            422,
+            "The aggregate schema or metadata is invalid. Check counts, dates, and quality declarations.",
+        )
     contract = get_object_or_404(MetricContract, id=parsed.contract_id, project=project)
-    return assessment_record(save_snapshot(request.user, project, contract, parsed.model_dump(mode='json'), 'csv'))
+    return assessment_record(
+        save_snapshot(request.user, project, contract, parsed.model_dump(mode="json"), "csv")
+    )
 
 
-@api.post('/projects/{project_id}/experiments')
+@api.post("/projects/{project_id}/experiments")
 def independent_experiment(request, project_id: uuid.UUID, data: S.ExperimentIn):
     project = project_for(request.user, project_id, write=True)
     experiment = Experiment.objects.create(project=project, **data.model_dump())
-    audit(request.user, project, 'experiment.create', experiment)
+    audit(request.user, project, "experiment.create", experiment)
     return experiment_record(experiment)
 
 
-@api.post('/projects/{project_id}/connections/posthog')
+@api.post("/projects/{project_id}/connections/posthog")
 def connect_posthog(request, project_id: uuid.UUID, data: S.PostHogIn):
     from .posthog import verify, encrypt, ConnectorError
+
     project = project_for(request.user, project_id, owner=True)
     contract = get_object_or_404(MetricContract, id=data.contract_id, project=project)
-    if project.contracts.order_by('-version').first().id != contract.id:
-        raise HttpError(409, 'Use the latest approved metric definition.')
+    if project.contracts.order_by("-version").first().id != contract.id:
+        raise HttpError(409, "Use the latest approved metric definition.")
     try:
         encrypted = encrypt(data.api_key)
-        endpoint = verify(data.region, data.external_project_id, data.api_key, data.endpoint_name, data.endpoint_version)
+        endpoint = verify(
+            data.region,
+            data.external_project_id,
+            data.api_key,
+            data.endpoint_name,
+            data.endpoint_version,
+        )
     except ConnectorError as exc:
         raise HttpError(422, str(exc))
     with transaction.atomic():
-        connection, _ = Connection.objects.update_or_create(project=project, defaults={'region': data.region, 'external_project_id': data.external_project_id, 'credential': encrypted, 'endpoints': endpoint, 'contract_hash': contract.content_hash, 'status': 'connected', 'last_error': ''})
-        audit(request.user, project, 'connection.connect', connection)
-    return record(connection, 'id region external_project_id endpoints status')
+        connection, _ = Connection.objects.update_or_create(
+            project=project,
+            defaults={
+                "region": data.region,
+                "external_project_id": data.external_project_id,
+                "credential": encrypted,
+                "endpoints": endpoint,
+                "contract_hash": contract.content_hash,
+                "status": "connected",
+                "last_error": "",
+            },
+        )
+        audit(request.user, project, "connection.connect", connection)
+    return record(connection, "id region external_project_id endpoints status")
 
 
-@api.get('/projects/{project_id}/connections/posthog/catalog')
+@api.get("/projects/{project_id}/connections/posthog/catalog")
 def posthog_catalog(request, project_id: uuid.UUID):
     from .posthog import catalog, ConnectorError
+
     project = project_for(request.user, project_id, write=True)
     connection = get_object_or_404(Connection, project=project)
     try:
@@ -484,76 +825,143 @@ def posthog_catalog(request, project_id: uuid.UUID):
         raise HttpError(422, str(exc))
 
 
-@api.post('/projects/{project_id}/analytics/refresh', response={202: dict})
+@api.post("/projects/{project_id}/analytics/refresh", response={202: dict})
+@transaction.atomic
 def posthog_refresh(request, project_id: uuid.UUID, data: S.RefreshIn):
     project = project_for(request.user, project_id, write=True)
+    Project.objects.select_for_update().get(id=project.id)
     connection = get_object_or_404(Connection, project=project)
-    if connection.status == 'needs_reconciliation':
-        raise HttpError(409, 'The metric definition changed. Reconcile the endpoint and reconnect.')
-    recent = project.jobs.filter(kind='posthog_refresh', created_at__gte=timezone.now()-timedelta(hours=1)).count()
-    key = request.headers.get('Idempotency-Key', '')
-    if recent >= 6 and not project.jobs.filter(kind='posthog_refresh', idempotency_key=key).exists():
-        raise HttpError(429, 'This project reached its six-refresh hourly request budget.')
-    contract = project.contracts.order_by('-version').first()
+    if connection.status == "needs_reconciliation":
+        raise HttpError(409, "The metric definition changed. Reconcile the endpoint and reconnect.")
+    recent = project.jobs.filter(
+        kind="posthog_refresh", created_at__gte=timezone.now() - timedelta(hours=1)
+    ).count()
+    key = request.headers.get("Idempotency-Key", "")
+    if (
+        recent >= 6
+        and not project.jobs.filter(kind="posthog_refresh", idempotency_key=key).exists()
+    ):
+        raise HttpError(429, "This project reached its six-refresh hourly request budget.")
+    contract = project.contracts.order_by("-version").first()
     if connection.contract_hash != contract.content_hash:
-        raise HttpError(409, 'The endpoint and current contract do not match. Reconcile and reconnect.')
-    job, _ = enqueue(request.user, project, 'posthog_refresh', {**data.model_dump(mode='json'), 'connection_id':str(connection.id), 'contract_id':str(contract.id), 'contract_hash':contract.content_hash}, key)
-    return 202, record(job, 'id kind status progress')
+        raise HttpError(
+            409, "The endpoint and current contract do not match. Reconcile and reconnect."
+        )
+    job, _ = enqueue(
+        request.user,
+        project,
+        "posthog_refresh",
+        {
+            **data.model_dump(mode="json"),
+            "connection_id": str(connection.id),
+            "contract_id": str(contract.id),
+            "contract_hash": contract.content_hash,
+        },
+        key,
+    )
+    return 202, record(job, "id kind status progress")
 
 
-@api.post('/studies/{study_id}/runs', response={202: dict})
+@api.post("/studies/{study_id}/runs", response={202: dict})
 @transaction.atomic
 def queue_panel(request, study_id: uuid.UUID, data: S.PanelIn):
     from decimal import Decimal
     from .panel import freeze_config, PanelError
+
     study = get_object_or_404(Study, id=study_id)
     project = project_for(request.user, study.project_id, write=True)
-    Project.objects.select_for_update().get(id=project.id)
+    Workspace.objects.select_for_update().get(id=project.workspace_id)
+    project = Project.objects.select_for_update().get(id=project.id)
     if Decimal(str(data.budget)) > project.run_budget_limit:
-        raise HttpError(422, 'The requested spend exceeds the owner’s per-run limit.')
-    key = request.headers.get('Idempotency-Key', '')
-    existing = Job.objects.filter(project=project, kind='panel', idempotency_key=key).first()
-    payload = {'study_id':str(study.id), 'personas':data.personas, 'budget':data.budget}
+        raise HttpError(422, "The requested spend exceeds the owner’s per-run limit.")
+    key = request.headers.get("Idempotency-Key", "")
+    existing = Job.objects.filter(project=project, kind="panel", idempotency_key=key).first()
+    payload = {"study_id": str(study.id), "personas": data.personas, "budget": data.budget}
     if existing:
         if existing.payload != payload:
-            raise HttpError(409, 'This idempotency key was used for different panel parameters.')
-        return 202, record(existing, 'id kind status progress')
-    if Job.objects.filter(project__workspace=project.workspace,kind='panel',status__in=['queued','running']).count() >= 2:
-        raise HttpError(429, 'This workspace already has two pending panels. Wait or cancel a run.')
+            raise HttpError(409, "This idempotency key was used for different panel parameters.")
+        return 202, record(existing, "id kind status progress")
+    if (
+        Job.objects.filter(
+            project__workspace=project.workspace, kind="panel", status__in=["queued", "running"]
+        ).count()
+        >= 2
+    ):
+        raise HttpError(429, "This workspace already has two pending panels. Wait or cancel a run.")
     try:
         config = freeze_config(study, data.personas)
     except PanelError as exc:
         raise HttpError(503, str(exc))
-    job, _ = enqueue(request.user, project, 'panel', payload, key)
-    run = PanelRun.objects.create(study=study, job=job, config=config, budget=Decimal(str(data.budget)))
-    audit(request.user, project, 'panel.freeze', run)
-    return 202, record(job, 'id kind status progress')
+    job, _ = enqueue(request.user, project, "panel", payload, key)
+    run = PanelRun.objects.create(
+        study=study, job=job, config=config, budget=Decimal(str(data.budget))
+    )
+    audit(request.user, project, "panel.freeze", run)
+    return 202, record(job, "id kind status progress")
 
 
-@api.get('/runs/{run_id}/responses')
+@api.get("/runs/{run_id}/responses")
 def panel_responses(request, run_id: uuid.UUID):
     run = get_object_or_404(PanelRun, id=run_id)
     project_for(request.user, run.study.project_id)
     # Inspect generated reactions, but keep embeddings out of routine UI payloads.
-    return {'id':str(run.id), 'experimental':True, 'config':run.config, 'responses':[record(r,'id concept_id persona method status content usage') for r in run.responses.exclude(method__in=['anchors','embedding']).order_by('created_at')]}
+    return {
+        "id": str(run.id),
+        "experimental": True,
+        "config": run.config,
+        "responses": [
+            record(r, "id concept_id persona method status content usage")
+            for r in run.responses.exclude(method__in=["anchors", "embedding"]).order_by(
+                "created_at"
+            )
+        ],
+    }
 
 
-@api.post('/projects/{project_id}/assessments')
+@api.post("/projects/{project_id}/assessments")
 @transaction.atomic
 def integrate_assessment(request, project_id: uuid.UUID, data: S.AssessmentIn):
     from .analysis import assess, integrate_evidence
+
     project = project_for(request.user, project_id, write=True)
     Project.objects.select_for_update().get(id=project.id)
-    snapshots = list(AnalyticsSnapshot.objects.filter(project=project,id__in=data.snapshot_ids).select_related('contract').order_by('analysis_cutoff','created_at'))
-    datasets = list(HumanDataset.objects.filter(study__project=project,id__in=data.human_dataset_ids))
-    experiments = list(Experiment.objects.filter(project=project,id__in=data.experiment_ids))
-    if len(snapshots)!=len(set(data.snapshot_ids)) or len(datasets)!=len(set(data.human_dataset_ids)) or len(experiments)!=len(set(data.experiment_ids)):
-        raise HttpError(404,'An evidence reference is unavailable in this project.')
+    snapshots = list(
+        AnalyticsSnapshot.objects.filter(project=project, id__in=data.snapshot_ids)
+        .select_related("contract")
+        .order_by("analysis_cutoff", "created_at")
+    )
+    datasets = list(
+        HumanDataset.objects.filter(study__project=project, id__in=data.human_dataset_ids)
+    )
+    experiments = list(Experiment.objects.filter(project=project, id__in=data.experiment_ids))
+    if (
+        len(snapshots) != len(set(data.snapshot_ids))
+        or len(datasets) != len(set(data.human_dataset_ids))
+        or len(experiments) != len(set(data.experiment_ids))
+    ):
+        raise HttpError(404, "An evidence reference is unavailable in this project.")
     latest = snapshots[-1]
-    base = assess(latest.id, latest.rows, latest.analysis_cutoff, latest.quality, latest.contract.config, latest.source)
-    context = data.model_dump(mode='json',exclude={'snapshot_ids','human_dataset_ids','experiment_ids','analyst_note'})
-    brief = integrate_evidence(base,snapshots,datasets,experiments,context)
-    previous = project.assessments.order_by('-version').first()
-    assessment = Assessment.objects.create(project=project,snapshot=latest,version=previous.version+1 if previous else 1,brief=brief,analyst_note=data.analyst_note,owner_name=previous.owner_name if previous else request.user.username,review_date=(timezone.now()+timedelta(days=14)).date())
-    audit(request.user,project,'assessment.integrate',assessment)
+    base = assess(
+        latest.id,
+        latest.rows,
+        latest.analysis_cutoff,
+        latest.quality,
+        latest.contract.config,
+        latest.source,
+    )
+    context = data.model_dump(
+        mode="json", exclude={"snapshot_ids", "human_dataset_ids", "experiment_ids", "analyst_note"}
+    )
+    brief = integrate_evidence(base, snapshots, datasets, experiments, context)
+    previous = project.assessments.order_by("-version").first()
+    assessment = Assessment.objects.create(
+        project=project,
+        snapshot=latest,
+        version=previous.version + 1 if previous else 1,
+        brief=brief,
+        analyst_note=data.analyst_note,
+        owner_name=previous.owner_name if previous else request.user.username,
+        review_date=(timezone.now() + timedelta(days=14)).date(),
+    )
+    audit(request.user, project, "assessment.integrate", assessment)
     return assessment_record(assessment)

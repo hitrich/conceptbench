@@ -1,0 +1,15 @@
+.git
+.env
+.venv
+private
+node_modules
+frontend/node_modules
+frontend/dist
+output
+staticfiles
+**/__pycache__
+**/*.sqlite3
+
+.env.*
+**/test-results
+**/playwright-report

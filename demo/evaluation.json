@@ -1,0 +1,51 @@
+{
+  "status": "passed",
+  "fabricated": true,
+  "rule_version": "2026-09-07.3",
+  "retention": {
+    "earlier": {
+      "numerator": 225,
+      "denominator": 1200,
+      "rate": 18.75,
+      "interval": [
+        16.642631590315542,
+        21.056805947355393
+      ]
+    },
+    "later": {
+      "numerator": 144,
+      "denominator": 1200,
+      "rate": 12.0,
+      "interval": [
+        10.281584099458076,
+        13.960931946349774
+      ]
+    },
+    "change": {
+      "pp": -6.75,
+      "interval": [
+        -9.62650949694061,
+        -3.871414286085767
+      ]
+    }
+  },
+  "fixed_earlier_mix": 18.75,
+  "ssr_commit": "86dcd2597c7824e4fd6546b884c5500c43a4b022",
+  "ssr_distributions": [
+    [
+      1.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.5,
+      0.5,
+      0.0,
+      0.0,
+      0.0
+    ]
+  ],
+  "limitation": "Fabricated algebraic vectors only; not language embeddings or human evidence."
+}
