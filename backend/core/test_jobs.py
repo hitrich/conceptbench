@@ -122,6 +122,11 @@ class ConnectorTests(TestCase):
             with self.assertRaises(ConnectorError):verify('private',1,'phx_private_key','test',1)
         client.assert_not_called()
 
+    def test_connection_requires_a_fingerprintable_definition(self):
+        with patch('core.posthog.request', side_effect=[{'id':1}, {'name':'test','is_active':True,'query':None}]):
+            with self.assertRaisesMessage(ConnectorError, 'fingerprint'):
+                verify('us',1,'phx_test_key','test',1)
+
     def test_provider_timeout_preserves_last_successful_snapshot(self):
         user=get_user_model().objects.create_user('refresh-owner');project=seed_demo(user)
         contract=project.contracts.first()

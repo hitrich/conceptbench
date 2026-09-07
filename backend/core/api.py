@@ -22,7 +22,7 @@ from ninja.security import django_auth
 from . import schemas as S
 from .models import Workspace, Membership, Project, MetricContract, AnalyticsSnapshot, Assessment, Study, Concept, HumanDataset, Experiment, Job, Connection, PanelRun
 from .services import project_for, audit, create_contract, save_snapshot, enqueue, record, assessment_record
-from .analysis import digest
+from .analysis import calculate, digest
 from .demo import seed_demo
 from .research import parse_human_csv, summarize_human
 
@@ -151,7 +151,7 @@ def overview(request, project_id: uuid.UUID):
     latest = project.assessments.order_by('-version').first()
     contract = project.contracts.order_by('-version').first()
     connection = Connection.objects.filter(project=project).first()
-    return {'project': project_record(project), 'role': membership.role, 'can_export': membership.role != 'viewer' or membership.can_export, 'assessment': assessment_record(latest) if latest else None, 'assessment_versions': [record(a, 'id version created_at') for a in project.assessments.order_by('-version')], 'contract': record(contract, 'id version config content_hash created_at') if contract else None, 'connection': record(connection, 'id region external_project_id endpoints status last_error last_refresh') if connection else None, 'studies': [study_record(s) for s in project.studies.order_by('created_at')], 'experiments': [experiment_record(e) for e in project.experiments.order_by('-created_at')], 'jobs': [record(j, 'id kind status progress error created_at') for j in project.jobs.order_by('-created_at')[:10]]}
+    return {'project': project_record(project), 'role': membership.role, 'can_export': membership.role != 'viewer' or membership.can_export, 'assessment': assessment_record(latest) if latest else None, 'snapshot_versions': [record(s,'id collected_at analysis_cutoff source contract_id') for s in project.snapshots.order_by('-created_at')], 'assessment_versions': [record(a, 'id version created_at') for a in project.assessments.order_by('-version')], 'contract': record(contract, 'id version config content_hash created_at') if contract else None, 'connection': record(connection, 'id region external_project_id endpoints status last_error last_refresh') if connection else None, 'studies': [study_record(s) for s in project.studies.order_by('created_at')], 'experiments': [experiment_record(e) for e in project.experiments.order_by('-created_at')], 'jobs': [record(j, 'id kind status progress error created_at') for j in project.jobs.order_by('-created_at')[:10]]}
 
 
 @api.patch('/projects/{project_id}')
@@ -197,7 +197,7 @@ def import_aggregates(request, project_id: uuid.UUID, data: S.SnapshotIn):
 def snapshot_source(request, snapshot_id: uuid.UUID):
     snapshot = get_object_or_404(AnalyticsSnapshot, id=snapshot_id)
     project_for(request.user, snapshot.project_id)
-    return {**record(snapshot, 'id source rows quality source_metadata content_hash analysis_cutoff latest_event_at collected_at'), 'contract': record(snapshot.contract, 'id version config content_hash'), 'exclusions': 'Internal traffic excluded; incomplete windows excluded separately for A7 and W4.', 'counting_unit': 'identified_user'}
+    return {**record(snapshot, 'id source rows quality source_metadata content_hash analysis_cutoff latest_event_at collected_at'), 'rows': calculate(snapshot.rows, snapshot.analysis_cutoff)['cohorts'], 'contract': record(snapshot.contract, 'id version config content_hash'), 'exclusions': 'Internal traffic excluded; incomplete windows excluded separately for A7 and W4.', 'counting_unit': 'identified_user'}
 
 
 @api.get('/assessments/{assessment_id}')
@@ -236,6 +236,10 @@ def export_brief(request, assessment_id: uuid.UUID, format: str = 'markdown'):
             lines.append(f'\n- {e["label"]} [{e["id"]}]: {e["earlier"]["numerator"]}/{e["earlier"]["denominator"]} → {e["later"]["numerator"]}/{e["later"]["denominator"]}. Change {e["change"]["pp"]} pp; 95% CI {e["change"]["interval"]}.')
         for label, values in [('Contradictory evidence', b['contradictions']), ('Missing information', b['missing']), ('Limitations', b['limitations'])]:
             lines.extend([f'\n## {label}', *['- '+v for v in values]])
+        for research in b.get('research_evidence', []):
+            lines.extend(['\n## Linked research', f'{research["name"]} [{research["id"]}] · {research["type"]} · {research["response_count"]} responses', research.get('recruitment_source','')])
+        for intervention in b.get('intervention_evidence', []):
+            lines.extend(['\n## Reviewed intervention', f'{intervention["title"]} [{intervention["id"]}]', json.dumps(intervention['outcome'])])
         lines.extend(['\n## What would change the recommendation', b['what_would_change'], '\n## Analyst notes', assessment.analyst_note or 'No analyst notes.', f'\nRule version: {b["rule_version"]}; snapshot: {assessment.snapshot_id}.'])
         content = '\n'.join(lines)
     audit(request.user, project, 'brief.export', assessment)
@@ -290,6 +294,9 @@ def delete_dataset(request, dataset_id: uuid.UUID):
     dataset = get_object_or_404(HumanDataset, id=dataset_id)
     project = project_for(request.user, dataset.study.project_id, owner=True)
     audit(request.user, project, 'human.delete', dataset)
+    for assessment in project.assessments.all():
+        if str(dataset.id) in [r['id'] for r in assessment.brief.get('research_evidence',[])]:
+            assessment.delete()
     # Comparison summaries contain derivatives of the dataset and must be recomputed.
     dataset.study.runs.update(summary={})
     dataset.delete()
@@ -375,6 +382,7 @@ def cancel_job(request, job_id: uuid.UUID):
 def disconnect(request, connection_id: uuid.UUID):
     connection = get_object_or_404(Connection, id=connection_id)
     project = project_for(request.user, connection.project_id, owner=True)
+    Project.objects.select_for_update().get(id=project.id)
     project.jobs.filter(kind='posthog_refresh', status__in=['queued', 'running']).update(cancel_requested=True)
     audit(request.user, project, 'connection.disconnect', connection)
     connection.delete()
@@ -385,6 +393,7 @@ def disconnect(request, connection_id: uuid.UUID):
 @transaction.atomic
 def delete_project(request, project_id: uuid.UUID):
     project = project_for(request.user, project_id, owner=True)
+    Project.objects.select_for_update().get(id=project.id)
     Project.objects.filter(id=project.id).update(deleted_at=timezone.now())
     Connection.objects.filter(project=project).delete()
     project.jobs.update(cancel_requested=True)
@@ -527,3 +536,24 @@ def panel_responses(request, run_id: uuid.UUID):
     project_for(request.user, run.study.project_id)
     # Inspect generated reactions, but keep embeddings out of routine UI payloads.
     return {'id':str(run.id), 'experimental':True, 'config':run.config, 'responses':[record(r,'id concept_id persona method status content usage') for r in run.responses.exclude(method__in=['anchors','embedding']).order_by('created_at')]}
+
+
+@api.post('/projects/{project_id}/assessments')
+@transaction.atomic
+def integrate_assessment(request, project_id: uuid.UUID, data: S.AssessmentIn):
+    from .analysis import assess, integrate_evidence
+    project = project_for(request.user, project_id, write=True)
+    Project.objects.select_for_update().get(id=project.id)
+    snapshots = list(AnalyticsSnapshot.objects.filter(project=project,id__in=data.snapshot_ids).select_related('contract').order_by('analysis_cutoff','created_at'))
+    datasets = list(HumanDataset.objects.filter(study__project=project,id__in=data.human_dataset_ids))
+    experiments = list(Experiment.objects.filter(project=project,id__in=data.experiment_ids))
+    if len(snapshots)!=len(set(data.snapshot_ids)) or len(datasets)!=len(set(data.human_dataset_ids)) or len(experiments)!=len(set(data.experiment_ids)):
+        raise HttpError(404,'An evidence reference is unavailable in this project.')
+    latest = snapshots[-1]
+    base = assess(latest.id, latest.rows, latest.analysis_cutoff, latest.quality, latest.contract.config, latest.source)
+    context = data.model_dump(mode='json',exclude={'snapshot_ids','human_dataset_ids','experiment_ids','analyst_note'})
+    brief = integrate_evidence(base,snapshots,datasets,experiments,context)
+    previous = project.assessments.order_by('-version').first()
+    assessment = Assessment.objects.create(project=project,snapshot=latest,version=previous.version+1 if previous else 1,brief=brief,analyst_note=data.analyst_note,owner_name=previous.owner_name if previous else request.user.username,review_date=(timezone.now()+timedelta(days=14)).date())
+    audit(request.user,project,'assessment.integrate',assessment)
+    return assessment_record(assessment)

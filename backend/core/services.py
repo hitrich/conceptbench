@@ -68,4 +68,4 @@ def record(obj, fields):
 
 
 def assessment_record(assessment):
-    return record(assessment, 'id version created_at owner_name review_date analyst_note brief snapshot_id')
+    return {**record(assessment, 'id version created_at owner_name review_date analyst_note brief snapshot_id'), 'contract_id':str(assessment.snapshot.contract_id) if assessment.snapshot else None}

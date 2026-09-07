@@ -27,9 +27,20 @@ class NumericalTests(TestCase):
         self.assertEqual(brief['state'], 'test_segment_focus')
         quality['completeness_verified'] = False
         self.assertEqual(assess('fixture', self.fixture['rows'], self.fixture['analysis_cutoff'], quality, DEFAULT_CONTRACT)['state'], 'insufficient_evidence')
+        # Fixed-mix totals can also hide offsetting changes within segments.
+        quality['completeness_verified'] = True
+        offsetting = copy.deepcopy(self.fixture['rows'])
+        for row in offsetting:
+            if row['period'] == 'later':
+                row['retained'] += 12 if row['segment'] == 'Organic' else -48
+                row['retained_activated'] = min(row['retained_activated'], row['retained'])
+        self.assertAlmostEqual(calculate(offsetting, self.fixture['analysis_cutoff'])['standardized_later'], 18.75)
+        self.assertNotEqual(assess('offsetting', offsetting, self.fixture['analysis_cutoff'], quality, DEFAULT_CONTRACT)['state'], 'test_segment_focus')
 
     def test_wilson_golden_boundaries(self):
         self.assertIsNone(rate(0, 0)['rate'])
+        with self.assertRaises(ValueError):
+            rate(1, 0)
         self.assertAlmostEqual(rate(0, 10)['interval'][1], 27.7532799863, places=7)
         self.assertAlmostEqual(rate(10, 10)['interval'][0], 72.2467200137, places=7)
         self.assertAlmostEqual(rate(50, 100)['interval'][0], 40.383153, places=5)

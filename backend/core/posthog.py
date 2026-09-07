@@ -91,6 +91,8 @@ def verify(region, project_id, key, endpoint, version):
     result = request(region, project_id, key, f'endpoints/{endpoint}/?version={version}')
     if result.get('name') != endpoint or result.get('is_active') is not True:
         raise ConnectorError('The selected endpoint is unavailable or inactive.')
+    if not isinstance(result.get('query'), dict) or not result['query']:
+        raise ConnectorError('The endpoint did not expose a query definition to fingerprint. Use a reviewed CSV until the definition can be reconciled.')
     return {'name': endpoint, 'version': version, 'query_hash': digest(result.get('query')), 'project_name': str(project.get('name',''))[:160]}
 
 
@@ -108,7 +110,7 @@ def fetch_aggregates(connection, payload):
     endpoint = connection.endpoints
     key = decrypt(connection.credential)
     current = request(connection.region, connection.external_project_id, key, f'endpoints/{endpoint["name"]}/?version={endpoint["version"]}')
-    if digest(current.get('query')) != endpoint['query_hash']:
+    if current.get('is_active') is not True or digest(current.get('query')) != endpoint['query_hash']:
         raise ConnectorError('The pinned endpoint definition changed. Reconcile and reconnect before refreshing.')
     result = request(connection.region, connection.external_project_id, key, f'endpoints/{endpoint["name"]}/run/', 'POST', {'version': endpoint['version'], 'variables': {'date_from': payload['date_from'], 'date_to': payload['date_to']}, 'limit': 2000, 'refresh': 'force'})
     return parse_result(result, endpoint['version'])

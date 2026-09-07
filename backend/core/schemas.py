@@ -22,6 +22,17 @@ class ProjectIn(StrictSchema):
     cadence: Literal['weekly'] = 'weekly'
 
 
+class ReviewWindow(StrictSchema):
+    start: date
+    end: date
+
+    @model_validator(mode='after')
+    def ordered(self):
+        if self.end < self.start:
+            raise ValueError('Review-window end precedes its start.')
+        return self
+
+
 class ContractIn(StrictSchema):
     unit: Literal['identified_user'] = 'identified_user'
     entry_event: str = Field(min_length=1, max_length=120)
@@ -37,7 +48,17 @@ class ContractIn(StrictSchema):
     minimum_detectable_change_pp: float | None = Field(default=None, gt=0, le=100)
     viability_target: float | None = Field(default=None, gt=0, le=100)
     baseline_approved: bool = False
+    review_windows: list[ReviewWindow] = Field(default_factory=list, max_length=6)
     confirmed: Literal[True]
+
+    @model_validator(mode='after')
+    def disjoint_windows(self):
+        windows = sorted(self.review_windows, key=lambda w: w.start)
+        if any(a.end >= b.start for a, b in zip(windows, windows[1:])):
+            raise ValueError('Declared review windows must not overlap.')
+        if any(not name.strip() or len(name) > 120 for name in self.segment_properties):
+            raise ValueError('Segment property names must contain 1–120 characters.')
+        return self
 
 
 class AggregateRow(StrictSchema):
@@ -56,6 +77,8 @@ class AggregateRow(StrictSchema):
             raise ValueError('Cohort end precedes cohort start.')
         if max(self.activated, self.retained) > self.signups or self.retained_activated > min(self.activated, self.retained):
             raise ValueError('A numerator exceeds its denominator.')
+        if self.retained_activated < self.activated+self.retained-self.signups:
+            raise ValueError('Activated and retained counts have an impossible overlap.')
         return self
 
 
@@ -172,3 +195,14 @@ class RetentionIn(StrictSchema):
     raw_retention_days: int = Field(ge=1, le=30)
     aggregate_retention_days: int = Field(ge=1, le=90)
     run_budget_limit: float = Field(ge=0, le=100)
+
+
+class AssessmentIn(StrictSchema):
+    snapshot_ids: list[UUID] = Field(min_length=1, max_length=6)
+    human_dataset_ids: list[UUID] = Field(default_factory=list, max_length=5)
+    experiment_ids: list[UUID] = Field(default_factory=list, max_length=10)
+    research_relevance_confirmed: bool = False
+    human_signal: Literal['none', 'expectation_mismatch', 'reliability_issue', 'weak_value'] = 'none'
+    alternative_kind: Literal['audience', 'problem', 'solution', 'positioning', 'business_model'] = 'solution'
+    alternative_hypothesis: str = Field(default='', max_length=3000)
+    analyst_note: str = Field(default='', max_length=6000)

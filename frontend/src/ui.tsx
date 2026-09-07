@@ -14,4 +14,4 @@ export function Loading(){ return <div className="loading"><LoaderCircle classNa
 export function External({href, children}: {href: string; children: ReactNode}) { return <a href={href} target="_blank" rel="noreferrer">{children}<ArrowUpRight size={14}/></a> }
 export const formValues = (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); return Object.fromEntries(new FormData(event.currentTarget)) as Record<string,string> }
 export const tomorrow = (days = 14) => { const date = new Date(); date.setDate(date.getDate()+days); return date.toISOString().slice(0,10) }
-export function Submit({busy, label = 'Save changes'}: {busy: boolean; label?: string}) { return <button type="submit" className="button primary" disabled={busy}>{busy && <LoaderCircle size={15} className="spin"/>}{busy ? 'Saving…' : label}</button> }
+export function Submit({busy, disabled = false, label = 'Save changes'}: {busy: boolean; disabled?: boolean; label?: string}) { return <button type="submit" className="button primary" disabled={busy || disabled}>{busy && <LoaderCircle size={15} className="spin"/>}{busy ? 'Saving…' : label}</button> }

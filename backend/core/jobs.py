@@ -117,6 +117,16 @@ def purge_expired():
         raw_cutoff = now-timedelta(days=project.raw_retention_days)
         aggregate_cutoff = now-timedelta(days=project.aggregate_retention_days)
         HumanDataset.objects.filter(study__project=project, expired=False).filter(Q(expires_at__lte=now)|Q(created_at__lt=raw_cutoff)).update(rows=[],expired=True)
+        expired_ids = {str(d.id) for d in HumanDataset.objects.filter(study__project=project,expired=True)}
+        for assessment in project.assessments.all():
+            modified = False
+            for source in assessment.brief.get('research_evidence', []):
+                if source['id'] in expired_ids and not source.get('raw_source_expired'):
+                    source['recruitment_source'] = 'Raw source expired under the retention policy.'
+                    source['raw_source_expired'] = True
+                    modified = True
+            if modified:
+                assessment.save(update_fields=['brief'])
         old_runs = PanelRun.objects.filter(study__project=project,created_at__lt=raw_cutoff)
         Job.objects.filter(panel_run__in=old_runs,status__in=['queued','running']).update(cancel_requested=True)
         for run in old_runs:

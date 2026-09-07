@@ -5,7 +5,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from math import sqrt
 from collections import defaultdict
 
-RULE_VERSION = '2026-09-07.1'
+RULE_VERSION = '2026-09-07.3'
 
 
 def digest(value):
@@ -13,10 +13,10 @@ def digest(value):
 
 
 def rate(k, n):
-    if n == 0:
-        return {'numerator': k, 'denominator': n, 'rate': None, 'interval': None}
     if not 0 <= k <= n:
         raise ValueError('Invalid binomial counts')
+    if n == 0:
+        return {'numerator': k, 'denominator': n, 'rate': None, 'interval': None}
     p, z = k / n, 1.959963984540054
     center = (p + z*z/(2*n)) / (1 + z*z/n)
     margin = z * sqrt(p*(1-p)/n + z*z/(4*n*n)) / (1+z*z/n)
@@ -97,7 +97,7 @@ def assess(snapshot_id, rows, cutoff, quality, contract, source='csv'):
         state, title = 'fix_measurement', 'Check the measurement before interpreting the change.'
         summary = 'Tracking or identity problems can explain the signal. Repair the event mapping and reconcile a new snapshot.'
     elif all_verified and change is not None:
-        if standardized is not None and abs(standardized-retention['earlier']['rate']) < 0.05 and abs(change) > 0.1:
+        if standardized is not None and abs(change) > 0.1 and all(abs(s['change']['pp']) < 1e-9 for s in result['segments']):
             state = 'test_segment_focus'
             title = 'Investigate acquisition quality before product direction.'
             summary = 'The aggregate retention decline is explained by the measured acquisition mix. Within-source return rates are unchanged. Review the paid audience and test a more focused acquisition approach.' if change < 0 else 'The aggregate increase is explained by the measured acquisition mix. Validate the audience before attributing this change to the product.'
@@ -122,3 +122,53 @@ def assess(snapshot_id, rows, cutoff, quality, contract, source='csv'):
     for key, label in [('retention', 'W4 value retention'), ('activation', 'A7 activation'), ('conditional', 'W4 among A7-activated users')]:
         evidence.append({'id': f'{snapshot_id}:{key}', 'type': 'computed', 'label': label, 'snapshot_id': str(snapshot_id), **result['metrics'][key]})
     return {'rule_version': RULE_VERSION, 'state': state, 'title': title, 'summary': summary, 'analysis': result, 'evidence': evidence, 'contradictions': contradictions, 'missing': missing, 'what_would_change': 'A reconciled change within the same acquisition sources, relevant human research, or the reviewed outcome of a narrower intervention.', 'next_experiment': 'Test a focused paid audience' if state == 'test_segment_focus' else 'Resolve the highest-priority evidence gap', 'dimensions': {'measurement': 'Verified demo fixture' if source == 'demo' else ('Owner-confirmed' if all_verified else 'Needs verification'), 'effect_uncertainty': '95% Wilson / Newcombe intervals', 'synthetic_validity': 'Not validated for this audience', 'competing_explanations': 'Acquisition economics and recruitment bias unresolved'}, 'limitations': ['Intervals assume independent signup cohorts; they do not account for missing tracking, selection bias, or seasonality.', 'Conditional retention is descriptive and does not show that activation causes retention.', 'No revenue, willingness-to-pay, or pivot-probability conclusion is supported.'], 'synthetic': source == 'demo'}
+
+
+def integrate_evidence(brief, snapshots, datasets, experiments, context):
+    """Add reviewed human/context evidence without letting it override mix or measurement."""
+    brief = json.loads(json.dumps(brief))
+    brief['rule_version'] = RULE_VERSION
+    brief['research_evidence'] = [{'id': str(d.id), 'type': 'reported' if not d.metadata.get('synthetic') else 'demonstration', 'name': d.name, 'recruitment_source': d.metadata.get('recruitment_source',''), 'response_count': sum(v['n'] for v in d.summary.values()), 'collected_at': d.created_at.isoformat()} for d in datasets]
+    brief['intervention_evidence'] = [{'id':str(e.id),'title':e.title,'outcome':e.outcome} for e in experiments]
+    brief['context'] = context
+    brief['assessment_snapshot_ids'] = [str(s.id) for s in snapshots]
+    real_human = any(not d.metadata.get('synthetic') and not d.expired for d in datasets) and context['research_relevance_confirmed']
+    protected = brief['state'] in ['fix_measurement', 'test_segment_focus']
+    measurement = all(all(s.quality.get(k) for k in ['definitions_verified','identity_verified','completeness_verified','sampling_verified']) and not s.quality.get('tracking_issue') and not s.quality.get('missing_events') for s in snapshots)
+    if real_human and measurement and not protected:
+        if context['human_signal'] == 'expectation_mismatch':
+            brief.update(state='test_positioning',title='Test whether the product promise sets the right expectations.',summary='Relevant human research reports an expectation mismatch. Test a specific explanation or promise with the intended audience and inspect behavior after exposure.')
+        elif context['human_signal'] == 'reliability_issue':
+            brief.update(state='investigate_friction',title='Investigate reliability before reconsidering the product.',summary='Reviewed human evidence points to a reliability problem. Test a focused repair, verify the instrumentation, and review complete value-delivery windows.')
+    pivot_gaps = []
+    latest = snapshots[-1]
+    config = latest.contract.config
+    target, effect = config.get('viability_target'), config.get('minimum_detectable_change_pp')
+    declared = config.get('review_windows', [])
+    windows = []
+    persistent = bool(target and effect and config.get('baseline_approved') and len(snapshots)>=2)
+    for snapshot in snapshots:
+        analysis = calculate(snapshot.rows,snapshot.analysis_cutoff)
+        window = analysis['periods'].get('later')
+        measured = analysis['metrics']['retention']['later']
+        if not window or measured['interval'] is None or not target or not effect or measured['interval'][1] >= target-effect or analysis['excluded']:
+            persistent = False
+        if window:
+            windows.append(window)
+            if window not in declared or snapshot.contract.created_at > datetime.combine(date.fromisoformat(window['start']), time.min, tzinfo=timezone.utc):
+                persistent = False
+        if snapshot.contract.content_hash != latest.contract.content_hash:
+            persistent = False
+    windows.sort(key=lambda w:w['start'])
+    if any(a['end'] >= b['start'] for a,b in zip(windows,windows[1:])):
+        persistent = False
+    failed = [e for e in experiments if e.status=='complete' and e.outcome and e.outcome.get('decision')=='stop']
+    if not measurement:pivot_gaps.append('Usable, reconciled measurement in every review window')
+    if not persistent:pivot_gaps.append('Multiple disjoint, predeclared mature windows with precise shortfalls against an approved target')
+    if not real_human or context['human_signal']!='weak_value':pivot_gaps.append('Relevant real human evidence corroborating weak value realization')
+    if len(failed)<2:pivot_gaps.append('At least two reviewed, unsuccessful narrower interventions')
+    if len(context['alternative_hypothesis'])<10:pivot_gaps.append('A specific alternative problem, audience, or solution hypothesis')
+    brief['pivot_eligibility'] = {'eligible':not pivot_gaps and not protected, 'missing':pivot_gaps}
+    if not pivot_gaps and not protected:
+        brief.update(state='evaluate_pivot',title='Evaluate a specific alternative hypothesis.',summary='The predeclared review windows show persistent weak value realization, corroborated by relevant human research and unsuccessful narrower interventions. Compare the proposed alternative in a bounded real-world test; this is not an instruction to pivot.')
+    return brief
