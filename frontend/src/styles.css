@@ -49,7 +49,7 @@ input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
 summary:focus-visible {
-  outline: var(--space-3) solid var(--accent);
+  outline: var(--space-3) solid var(--accent-dark);
   outline-offset: var(--space-3);
 }
 button:active:not(:disabled) {
@@ -2874,7 +2874,7 @@ strong {
 .field > input:focus,
 .field > textarea:focus,
 .field > select:focus {
-  outline: var(--space-2) solid var(--accent);
+  outline: var(--space-2) solid var(--accent-dark);
   outline-offset: var(--space-2);
   box-shadow: var(--shadow-control);
 }

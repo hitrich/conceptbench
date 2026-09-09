@@ -297,6 +297,10 @@ test('slow session startup announces loading and resolves into the workspace', a
 test('dark appearance preserves contrast across the workspace', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'dark' })
   await openDemo(page)
+  const action = page.getByRole('button', { name: 'New review', exact: true })
+  await action.focus()
+  await expect(action).toHaveCSS('outline-color', 'rgb(121, 186, 255)')
+  await expect(action).toHaveCSS('outline-style', 'solid')
   for (const name of [/^Review$/, /^ConceptLab$/, /^Experiments/, /^Data & Settings$/]) {
     await page.getByRole('navigation').getByRole('button', { name }).click()
     const result = await new AxeBuilder({ page })
