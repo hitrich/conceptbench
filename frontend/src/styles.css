@@ -370,7 +370,7 @@ td:last-child {
   color: var(--muted);
 }
 .sidebar-bottom-link:hover {
-  color: var(--accent);
+  color: var(--accent-dark);
 }
 .sidebar-version {
   display: flex;
@@ -477,7 +477,7 @@ td:last-child {
 }
 .icon-button:hover {
   background: var(--subtle);
-  color: var(--accent);
+  color: var(--accent-dark);
 }
 .button {
   min-height: var(--space-40);
@@ -501,7 +501,7 @@ td:last-child {
 }
 .button.primary {
   background: var(--accent);
-  border-color: var(--accent);
+  border-color: var(--accent-dark);
   color: var(--on-accent);
   box-shadow: var(--shadow-control);
 }
@@ -633,7 +633,7 @@ main {
   gap: var(--space-6);
 }
 .report-tabs > button.active {
-  border-color: var(--accent);
+  border-color: var(--accent-dark);
   color: var(--muted);
   font-weight: 550;
 }
@@ -815,7 +815,7 @@ main {
   border-right: 0;
 }
 .metric:hover .metric-label {
-  color: var(--accent);
+  color: var(--accent-dark);
 }
 .metric-label {
   color: var(--muted);
@@ -2290,7 +2290,7 @@ dialog .table-scroll td small {
 .field > input:focus,
 .field > textarea:focus,
 .field > select:focus {
-  border-color: var(--accent);
+  border-color: var(--accent-dark);
   box-shadow: var(--shadow-control);
   outline: none;
 }
@@ -2333,7 +2333,7 @@ dialog .table-scroll td small {
 }
 .checkbox input {
   margin-top: var(--space-4);
-  accent-color: var(--accent);
+  accent-color: var(--accent-dark);
   width: var(--space-14);
   height: var(--space-14);
   flex-shrink: 0;
@@ -2790,7 +2790,7 @@ strong {
 }
 .report-tabs > button.active {
   color: var(--accent-dark);
-  border-color: var(--accent);
+  border-color: var(--accent-dark);
 }
 .study-nav button.active {
   background: var(--selection);
@@ -2851,7 +2851,7 @@ strong {
 .concept-letter {
   background: var(--accent);
   color: var(--on-accent);
-  border-color: var(--accent);
+  border-color: var(--accent-dark);
 }
 .concept-score strong {
   font-variant-numeric: tabular-nums;
@@ -2864,7 +2864,7 @@ strong {
   min-height: var(--space-32);
 }
 .button:hover:not(:disabled) {
-  border-color: var(--accent);
+  border-color: var(--accent-dark);
 }
 .quiet:hover,
 .text-button:hover {
@@ -4496,4 +4496,32 @@ dialog.drawer {
   .sidebar {
     transition: none;
   }
+}
+
+.source-card {
+  min-width: 0;
+}
+.source-card-top,
+.source-buttons,
+.source-capabilities {
+  flex-wrap: wrap;
+}
+.concept-card {
+  min-width: 0;
+}
+.concept-score {
+  flex-wrap: wrap;
+}
+.page-heading,
+.list-toolbar,
+.study-toolbar,
+.lab-intro {
+  flex-wrap: wrap;
+}
+.segmented {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.segmented button {
+  flex-shrink: 0;
 }

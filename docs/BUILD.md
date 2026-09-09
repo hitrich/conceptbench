@@ -15,6 +15,14 @@ ConceptBench implements the self-hosted software pilot from the supplied technic
 
 Experiment specifications freeze when a test starts. An outcome can be recorded only once. Later reviews explicitly select that outcome as evidence. Changes to a running test require a new experiment, keeping the original stopping rule and hypothesis inspectable.
 
+## Apple-inspired refinement — 9 September 2026
+
+The workspace uses one CSS token theme with platform system fonts, relative dimensions, neutral grouped surfaces, blue actions, and system-selected light/dark appearance. Navigation uses restrained translucent material; reduced transparency and increased contrast switch it to solid surfaces. Reduced motion removes travel and button scaling. No animation or UI dependency was added. The native dialog closes before React removes it, restoring keyboard focus to its opening control.
+
+Verification includes ten Chromium journeys, automated WCAG A/AA scans on all four pages in both appearances, and responsive checks at 320, 390, 768, 1024, 1440 and 1920 pixels at standard and 125% text size. The skill's rendered state checker passed 602 default/hover/focus checks across the four page snapshots in light and dark. Twenty-one semantic text pairs per theme were measured with the supplied contrast utility: minimum 4.66:1 in light and 5.45:1 in dark. Hardcode and theme-reference checks passed for the shared styles/theme and dialog primitive. The aesthetic audit reported no high finding; its medium equal-sized metric-row finding is intentional for comparing data, and was reviewed visually.
+
+The bundled skill-kit `accuracy_report.mjs` reported 9/37 on its own reference examples: browser dependencies are absent in that kit, and its token-build output directory is read-only. This is not an application score. Its state and taste scripts were run separately against actual ConceptBench DOM snapshots using the application's already-installed Playwright runtime. Automated checks do not replace testing with people or assistive technology. Screenshots continue to show explicitly fabricated demo evidence; analytical rules and validation limits are unchanged.
+
 ## Interface verification — 9 September 2026
 
 The redesigned interface passes all eight Chromium journeys against the compiled Docker application, including automated accessibility checks on all four main pages. Loading announcements and Quick Find's empty and case-insensitive results are covered. All four pages were checked at 320, 390, 768, 1024, 1440 and 1920 pixels without viewport overflow; concept chart baselines were checked at tablet width. Production compilation and formatting pass. README screenshots were refreshed from isolated fabricated demo sessions. This interface update adds no dependencies and does not change the analytical rules or pilot validation limits.

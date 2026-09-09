@@ -20,6 +20,7 @@ test('demo review, inspect evidence, revise, and export the actual brief', async
   await expect(page.getByRole('dialog')).toContainText('first_report_completed')
   await page.keyboard.press('Escape')
   await expect(page.getByRole('dialog')).not.toBeVisible()
+  await expect(page.getByRole('button', { name: 'View source', exact: true })).toBeFocused()
   await page.getByRole('button', { name: 'Show data table' }).click()
   await expect(page.getByRole('table')).toHaveCount(2)
   await page.getByRole('button', { name: 'Edit', exact: true }).click()
@@ -291,4 +292,40 @@ test('slow session startup announces loading and resolves into the workspace', a
   }
   await expect(page.getByRole('heading', { name: 'Product review' })).toBeVisible()
   await expect(page.getByRole('status', { name: 'Preparing your workspace' })).toHaveCount(0)
+})
+
+test('dark appearance preserves contrast across the workspace', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'dark' })
+  await openDemo(page)
+  for (const name of [/^Review$/, /^ConceptLab$/, /^Experiments/, /^Data & Settings$/]) {
+    await page.getByRole('navigation').getByRole('button', { name }).click()
+    const result = await new AxeBuilder({ page })
+      .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+      .analyze()
+    expect(
+      result.violations.map((v) => ({ id: v.id, targets: v.nodes.map((n) => n.target) })),
+    ).toEqual([])
+  }
+})
+
+test('enlarged text reflows controls on phone and tablet', async ({ page }) => {
+  await openDemo(page)
+  await page.evaluate(() => {
+    document.documentElement.style.fontSize = '125%'
+  })
+  for (const width of [320, 768, 1024]) {
+    await page.setViewportSize({ width, height: 1000 })
+    for (const [route, heading] of [
+      ['review', 'Product review'],
+      ['lab', 'ConceptLab'],
+      ['experiments', 'Experiments'],
+      ['data', 'Data & Settings'],
+    ]) {
+      await page.evaluate((route) => {
+        location.hash = route
+      }, route)
+      await expect(page.locator('.page-heading h1')).toHaveText(heading)
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBe(width)
+    }
+  }
 })

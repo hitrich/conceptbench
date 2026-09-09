@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from 'react'
+import { useLayoutEffect, useId, useRef } from 'react'
 import type { ReactNode, FormEvent } from 'react'
 import { X, ArrowUpRight, CircleHelp, LoaderCircle } from 'lucide-react'
 
@@ -17,7 +17,8 @@ export function Dialog({
 }) {
   const ref = useRef<HTMLDialogElement>(null)
   const id = useId()
-  useEffect(() => {
+  // Close before DOM removal so the browser restores focus to the opening control.
+  useLayoutEffect(() => {
     const dialog = ref.current
     dialog?.showModal()
     return () => dialog?.close()
