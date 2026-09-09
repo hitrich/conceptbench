@@ -17,7 +17,6 @@ import {
   Check,
   LogOut,
   Menu,
-  Sparkles,
   Layers,
 } from 'lucide-react'
 import type { Overview, Project, Assessment, Session, Source } from './types'
@@ -278,16 +277,6 @@ export default function App() {
           ))}
         </nav>
         <div className="sidebar-foot">
-          <div className="workspace-tip">
-            <span className="tip-icon">
-              <Sparkles size={16} />
-            </span>
-            <strong>Make the next move count.</strong>
-            <p>A small, owned experiment beats a confident guess.</p>
-            <button onClick={() => open('guide')}>
-              Meet your workspace <ArrowUpRight size={13} />
-            </button>
-          </div>
           <button className="sidebar-bottom-link" onClick={() => open('guide')}>
             <BookOpen size={16} />
             Methodology & guide
@@ -353,9 +342,6 @@ export default function App() {
         <main id="main">
           <div className="page-heading">
             <div>
-              <div className="page-eyebrow">
-                {route === 'review' ? 'EVIDENCE → DIRECTION' : 'THE PRODUCT WORKBENCH'}
-              </div>
               <h1>{pageText[route][0]}</h1>
               <p>{pageText[route][1]}</p>
             </div>

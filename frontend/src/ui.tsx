@@ -38,7 +38,6 @@ export function Dialog({
       <div className="dialog-inner">
         <div className="dialog-heading">
           <div>
-            <span className="eyebrow">CONCEPTBENCH</span>
             <h2 id={id}>{title}</h2>
           </div>
           <button className="icon-button" aria-label="Close dialog" onClick={close}>
@@ -129,7 +128,7 @@ export function Submit({
   label?: string
 }) {
   return (
-    <button type="submit" className="button primary" disabled={busy || disabled}>
+    <button type="submit" className="button primary" aria-busy={busy} disabled={busy || disabled}>
       {busy && <LoaderCircle size={15} className="spin" />}
       {busy ? 'Saving…' : label}
     </button>

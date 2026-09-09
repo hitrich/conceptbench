@@ -18,7 +18,13 @@ import type { Overview, Study, Session, HumanSummary } from './types'
 import { api, download, number, dateLabel } from './api'
 import { Dialog, Field, Empty, Submit, formValues } from './ui'
 
-const colors = ['#e0e7d9', '#b7cbbb', '#8bab96', '#528569', '#246653']
+const colors = [
+  'var(--rating-1)',
+  'var(--rating-2)',
+  'var(--rating-3)',
+  'var(--rating-4)',
+  'var(--rating-5)',
+]
 export default function ConceptLab({
   data,
   session,

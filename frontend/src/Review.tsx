@@ -104,8 +104,8 @@ function SlopeChart({
     >
       <defs>
         <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--accent)" stopOpacity=".10" />
-          <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
+          <stop offset="0%" stopColor="var(--chart-observed)" stopOpacity=".10" />
+          <stop offset="100%" stopColor="var(--chart-observed)" stopOpacity="0" />
         </linearGradient>
       </defs>
       {[0, 1, 2, 3].map((i) => (
@@ -139,7 +139,7 @@ function SlopeChart({
                 cx="452"
                 cy={y(standardized)}
                 r="4"
-                fill="white"
+                fill="var(--paper)"
                 stroke="var(--chart-secondary)"
                 strokeWidth="2"
               />
@@ -156,12 +156,26 @@ function SlopeChart({
           <path
             className="chart-line"
             d={`M76 ${y(a)} L452 ${y(b)}`}
-            stroke="var(--accent)"
+            stroke="var(--chart-observed)"
             strokeWidth="3"
             fill="none"
           />
-          <circle cx="76" cy={y(a)} r="5" fill="white" stroke="var(--accent)" strokeWidth="3" />
-          <circle cx="452" cy={y(b)} r="5" fill="white" stroke="var(--accent)" strokeWidth="3" />
+          <circle
+            cx="76"
+            cy={y(a)}
+            r="5"
+            fill="var(--paper)"
+            stroke="var(--chart-observed)"
+            strokeWidth="3"
+          />
+          <circle
+            cx="452"
+            cy={y(b)}
+            r="5"
+            fill="var(--paper)"
+            stroke="var(--chart-observed)"
+            strokeWidth="3"
+          />
           <text x="76" y={y(a) - 14} textAnchor="middle" className="chart-value">
             {number(a, 2)}%
           </text>
