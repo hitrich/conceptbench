@@ -15,6 +15,10 @@ ConceptBench implements the self-hosted software pilot from the supplied technic
 
 Experiment specifications freeze when a test starts. An outcome can be recorded only once. Later reviews explicitly select that outcome as evidence. Changes to a running test require a new experiment, keeping the original stopping rule and hypothesis inspectable.
 
+## Interface verification — 9 September 2026
+
+The redesigned interface passes all eight Chromium journeys against the compiled Docker application, including automated accessibility checks on all four main pages. Loading announcements and Quick Find's empty and case-insensitive results are covered. All four pages were checked at 320, 390, 768, 1024, 1440 and 1920 pixels without viewport overflow; concept chart baselines were checked at tablet width. Production compilation and formatting pass. README screenshots were refreshed from isolated fabricated demo sessions. This interface update adds no dependencies and does not change the analytical rules or pilot validation limits.
+
 ## Verification record — 7 September 2026
 
 The implementation passed 30 backend checks on both SQLite and PostgreSQL, and seven real Chromium journeys against the built Docker application. Those journeys cover demo/source/revision/export, human CSV, experiment lifecycle, aggregate CSV and immature-window displays, all four surfaces' automated WCAG A/AA checks, keyboard/mobile behavior, combined reviews, account/project/definition setup and last-owner protection. Automated accessibility checks do not replace user testing with assistive technology.

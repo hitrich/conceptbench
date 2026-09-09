@@ -118,7 +118,7 @@ function SlopeChart({
             stroke="var(--line)"
             strokeDasharray={i ? '3 4' : ''}
           />
-          <text x="32" y={y((i * max) / 3) + 4} textAnchor="end" fill="var(--muted)" fontSize="11">
+          <text x="36" y={y((i * max) / 3) + 4} textAnchor="end" fill="var(--muted)" fontSize="11">
             {number((i * max) / 3, 0)}%
           </text>
         </g>

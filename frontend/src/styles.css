@@ -1470,7 +1470,7 @@ main {
   display: flex;
   gap: 10px;
   align-items: center;
-  margin: 14px 0 23px;
+  margin: auto 0 23px;
   border-top: 1px solid var(--subtle);
   padding-top: 17px;
 }
@@ -1528,7 +1528,7 @@ main {
 }
 .concept-bottom {
   border-top: 1px solid var(--subtle);
-  margin-top: auto;
+  margin-top: 0;
   padding-top: 12px;
   display: flex;
   align-items: center;
@@ -2492,6 +2492,33 @@ dialog .table-scroll td small {
   background: #faf9f7;
   color: var(--muted);
   font-size: 14px;
+}
+.loading-preview {
+  width: min(320px, calc(100vw - 48px));
+  display: grid;
+  gap: 12px;
+  margin: 20px 0 6px;
+}
+.loading-preview span {
+  height: 12px;
+  background: var(--line);
+  border-radius: 3px;
+  animation: breathe 1.5s ease-in-out infinite alternate;
+}
+.loading-preview span:first-child {
+  height: 64px;
+  border-top: 3px solid var(--accent);
+}
+.loading-preview span:last-child {
+  width: 65%;
+}
+@keyframes breathe {
+  to {
+    opacity: 0.45;
+  }
+}
+.search-empty {
+  padding: 12px 9px;
 }
 .toast {
   position: fixed;
@@ -3910,6 +3937,9 @@ strong {
   }
   .filters {
     position: static;
+  }
+  .retention-chart text {
+    font-size: 18px;
   }
   .lab-intro {
     flex-wrap: wrap;

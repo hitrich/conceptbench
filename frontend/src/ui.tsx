@@ -89,8 +89,15 @@ export function Empty({
 }
 export function Loading() {
   return (
-    <div className="loading">
-      <LoaderCircle className="spin" size={26} />
+    <div className="loading" role="status" aria-label="Preparing your workspace">
+      <span className="brand" aria-hidden="true">
+        conceptbench.
+      </span>
+      <div className="loading-preview" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </div>
       <span>Preparing your workspace…</span>
     </div>
   )

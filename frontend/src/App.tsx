@@ -59,6 +59,9 @@ export default function App() {
     [formError, setFormError] = useState(''),
     [search, setSearch] = useState(''),
     [mobileNav, setMobileNav] = useState(false)
+  const query = search.trim().toLowerCase()
+  const matchingPages = nav.filter((n) => n.label.toLowerCase().includes(query))
+  const matchingProjects = projects.filter((p) => p.name.toLowerCase().includes(query))
   const notify = (s: string) => setToast(s)
   const loadProject = useCallback(async (id: string) => {
     const result = await api<Overview>(`/projects/${id}/overview`)
@@ -838,38 +841,39 @@ export default function App() {
             <kbd>ESC</kbd>
           </div>
           <div className="command-results">
-            {nav
-              .filter((n) => n.label.toLowerCase().includes(search.toLowerCase()))
-              .map(({ id, label, icon: Icon }) => (
-                <button
-                  key={id}
-                  onClick={() => {
-                    navigate(id)
-                    setModal('')
-                    setSearch('')
-                  }}
-                >
-                  <Icon size={18} />
-                  {label}
-                  <ArrowRight size={14} />
-                </button>
-              ))}
-            {projects
-              .filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
-              .map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => {
-                    void loadProject(p.id).catch((e) => notify(e.message))
-                    setModal('')
-                    setSearch('')
-                  }}
-                >
-                  <Layers size={18} />
-                  {p.name}
-                  <span>Project</span>
-                </button>
-              ))}
+            {matchingPages.length === 0 && matchingProjects.length === 0 && (
+              <p className="search-empty" role="status">
+                No pages or projects match “{search}”. Try a shorter name.
+              </p>
+            )}
+            {matchingPages.map(({ id, label, icon: Icon }) => (
+              <button
+                key={id}
+                onClick={() => {
+                  navigate(id)
+                  setModal('')
+                  setSearch('')
+                }}
+              >
+                <Icon size={18} />
+                {label}
+                <ArrowRight size={14} />
+              </button>
+            ))}
+            {matchingProjects.map((p) => (
+              <button
+                key={p.id}
+                onClick={() => {
+                  void loadProject(p.id).catch((e) => notify(e.message))
+                  setModal('')
+                  setSearch('')
+                }}
+              >
+                <Layers size={18} />
+                {p.name}
+                <span>Project</span>
+              </button>
+            ))}
           </div>
         </Dialog>
       )}

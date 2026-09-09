@@ -187,6 +187,11 @@ test('desktop accessibility, keyboard drawer, mobile navigation, and no viewport
   await page.getByRole('button', { name: 'Review', exact: true }).click()
   await page.keyboard.press('ControlOrMeta+k')
   await expect(page.getByRole('dialog')).toBeVisible()
+  const search = page.getByRole('textbox', { name: 'Find a page or project' })
+  await search.fill('no-such-project')
+  await expect(page.getByRole('status')).toContainText('No pages or projects match')
+  await search.fill('  cOnCePt  ')
+  await expect(page.getByRole('dialog').getByRole('button', { name: 'ConceptLab' })).toBeVisible()
   await page.keyboard.press('Escape')
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(page.getByRole('button', { name: 'Open navigation' })).toBeVisible()
@@ -267,4 +272,23 @@ test('account creation, project context, and a frozen definition work from the U
   await page.getByRole('button', { name: 'Save access', exact: true }).click()
   await expect(page.getByRole('alert')).toContainText('Keep at least one workspace owner.')
   await expect(page.getByText('Your role: owner', { exact: true })).toBeVisible()
+})
+
+test('slow session startup announces loading and resolves into the workspace', async ({ page }) => {
+  let release!: () => void
+  const ready = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await page.route('**/api/v1/session', async (route) => {
+    await ready
+    await route.continue()
+  })
+  await page.goto('/')
+  try {
+    await expect(page.getByRole('status', { name: 'Preparing your workspace' })).toBeVisible()
+  } finally {
+    release()
+  }
+  await expect(page.getByRole('heading', { name: 'Product review' })).toBeVisible()
+  await expect(page.getByRole('status', { name: 'Preparing your workspace' })).toHaveCount(0)
 })
