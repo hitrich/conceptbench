@@ -104,8 +104,8 @@ function SlopeChart({
     >
       <defs>
         <linearGradient id="area" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#7466d7" stopOpacity=".10" />
-          <stop offset="100%" stopColor="#7466d7" stopOpacity="0" />
+          <stop offset="0%" stopColor="var(--accent)" stopOpacity=".10" />
+          <stop offset="100%" stopColor="var(--accent)" stopOpacity="0" />
         </linearGradient>
       </defs>
       {[0, 1, 2, 3].map((i) => (
@@ -115,10 +115,10 @@ function SlopeChart({
             x2="486"
             y1={y((i * max) / 3)}
             y2={y((i * max) / 3)}
-            stroke="#eae9ed"
+            stroke="var(--line)"
             strokeDasharray={i ? '3 4' : ''}
           />
-          <text x="32" y={y((i * max) / 3) + 4} textAnchor="end" fill="#73697f" fontSize="11">
+          <text x="32" y={y((i * max) / 3) + 4} textAnchor="end" fill="var(--muted)" fontSize="11">
             {number((i * max) / 3, 0)}%
           </text>
         </g>
@@ -130,7 +130,7 @@ function SlopeChart({
             <>
               <path
                 d={`M76 ${y(a)} L452 ${y(standardized)}`}
-                stroke="#9e99b0"
+                stroke="var(--chart-secondary)"
                 strokeWidth="2"
                 strokeDasharray="5 5"
                 fill="none"
@@ -140,7 +140,7 @@ function SlopeChart({
                 cy={y(standardized)}
                 r="4"
                 fill="white"
-                stroke="#a7a0b8"
+                stroke="var(--chart-secondary)"
                 strokeWidth="2"
               />
               <text
@@ -156,12 +156,12 @@ function SlopeChart({
           <path
             className="chart-line"
             d={`M76 ${y(a)} L452 ${y(b)}`}
-            stroke="#7160ce"
+            stroke="var(--accent)"
             strokeWidth="3"
             fill="none"
           />
-          <circle cx="76" cy={y(a)} r="5" fill="white" stroke="#7160ce" strokeWidth="3" />
-          <circle cx="452" cy={y(b)} r="5" fill="white" stroke="#7160ce" strokeWidth="3" />
+          <circle cx="76" cy={y(a)} r="5" fill="white" stroke="var(--accent)" strokeWidth="3" />
+          <circle cx="452" cy={y(b)} r="5" fill="white" stroke="var(--accent)" strokeWidth="3" />
           <text x="76" y={y(a) - 14} textAnchor="middle" className="chart-value">
             {number(a, 2)}%
           </text>
@@ -170,10 +170,10 @@ function SlopeChart({
           </text>
         </>
       )}
-      <text x="76" y="213" textAnchor="middle" fontSize="11" fill="#73697f">
+      <text x="76" y="213" textAnchor="middle" fontSize="11" fill="var(--muted)">
         Earlier cohort
       </text>
-      <text x="452" y="213" textAnchor="middle" fontSize="11" fill="#73697f">
+      <text x="452" y="213" textAnchor="middle" fontSize="11" fill="var(--muted)">
         Later cohort
       </text>
     </svg>
@@ -412,13 +412,6 @@ export default function Review({
                   <h2>{b.title}</h2>
                   <p>{b.summary}</p>
                 </div>
-                <div className="decision-mark" aria-hidden="true">
-                  <svg viewBox="0 0 100 100">
-                    <path d="M20 69V37l28-15 29 15v32L49 85Z" />
-                    <path d="m20 37 29 16 28-16M49 53v32M35 29l28 16v16" />
-                    <path d="m32 63 11 7 23-29" className="mark-check" />
-                  </svg>
-                </div>
               </div>
               <div className="decision-actions">
                 <button
@@ -578,7 +571,10 @@ export default function Review({
                       return (
                         <span
                           key={s.segment}
-                          style={{ width: `${pct}%`, background: i === 0 ? '#7460bc' : '#d8d4e7' }}
+                          style={{
+                            width: `${pct}%`,
+                            background: i === 0 ? 'var(--accent)' : 'var(--chart-paid)',
+                          }}
                           title={`${s.segment}: ${number(pct, 0)}%`}
                         >
                           {pct >= 15 ? `${number(pct, 0)}%` : ''}
@@ -591,7 +587,10 @@ export default function Review({
               <div className="mix-legend">
                 {a.segments.map((s, i) => (
                   <span key={s.segment}>
-                    <i className="dot" style={{ background: i === 0 ? '#7460bc' : '#d8d4e7' }} />
+                    <i
+                      className="dot"
+                      style={{ background: i === 0 ? 'var(--accent)' : 'var(--chart-paid)' }}
+                    />
                     {s.segment}
                   </span>
                 ))}
